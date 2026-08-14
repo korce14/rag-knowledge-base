@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RAG 知识库</title>
-  <link rel="stylesheet" href="/styles.css?v=20260814final6">
+  <link rel="stylesheet" href="/styles.css?v=20260814final13">
 </head>
 <body>
   <div class="app-shell">
@@ -105,11 +105,27 @@
       <div id="kbPermissionList" class="document-list"></div>
     </div>
   </div>
+
+  <div id="documentViewerDialog" class="dialog-backdrop hidden">
+    <div class="dialog-card document-viewer-card">
+      <div class="dialog-header">
+        <h2 id="documentViewerTitle">文档内容</h2>
+        <button type="button" id="closeDocumentViewer" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <div id="documentViewerContent" class="document-viewer-content"></div>
+      <div class="document-qa-box">
+        <input id="documentQuestion" class="text-input" type="text" placeholder="针对这篇文档提问">
+        <button id="askDocumentButton" class="primary-button" type="button">提问</button>
+      </div>
+      <div id="documentAnswer" class="document-answer"></div>
+    </div>
+  </div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=20260814final6"></script>
+  <script src="/app.js?v=20260814final13"></script>
 </body>
 </html>
+
 
 
 

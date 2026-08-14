@@ -15,6 +15,7 @@ from .agent import RagAgent
 from .feedback import FeedbackWeights
 from .observability import StructuredLogger
 from .documents import delete_document, ingest_file
+from .documents import extract_text
 from .documents import ingest_file_with_mode
 from .embedder import Embedder
 from .generator import Generator, fallback_answer
@@ -299,6 +300,14 @@ class KnowledgeBaseService:
     def list_visible_documents(self, actor: User, kb_id: str) -> list[Any]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
+
+    def get_document_content(self, actor: User, document_id: str) -> dict[str, Any]:
+        record = self.db.get_document(document_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        self._require_document_access(actor, record, Role.VIEWER)
+        text = extract_text(Path(record.file_path))
+        return {"id": record.id, "name": record.name, "text": text}
         return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
 
     def get_document_permissions(self, actor: User, document_id: str) -> list[dict[str, Any]]:

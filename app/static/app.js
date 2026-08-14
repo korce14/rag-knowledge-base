@@ -95,6 +95,44 @@ function renderKbs() {
   });
 }
 
+async function openDocumentViewer(documentId) {
+  state.viewingDocumentId = documentId;
+  const response = await api(`/api/documents/${documentId}/content`);
+  if (!response.ok) {
+    showToast("无法查看文档");
+    return;
+  }
+  const data = await response.json();
+  $("#documentViewerTitle").textContent = data.name;
+  $("#documentViewerContent").textContent = data.text;
+  $("#documentAnswer").textContent = "";
+  $("#documentQuestion").value = "";
+  $("#documentViewerDialog").classList.remove("hidden");
+}
+
+function closeDocumentViewer() {
+  $("#documentViewerDialog").classList.add("hidden");
+}
+
+async function askDocument() {
+  if (!state.viewingDocumentId) return;
+  const question = $("#documentQuestion").value.trim();
+  if (!question) return;
+  $("#documentAnswer").textContent = "正在生成...";
+  const response = await api("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({
+      kb_id: state.currentKbId,
+      question,
+      document_id: state.viewingDocumentId,
+      session_id: state.sessionId,
+      top_k: 5,
+    }),
+  });
+  const data = await response.json();
+  $("#documentAnswer").textContent = data.answer || "请求失败。";
+}
+
 async function selectKb(kbId) {
   state.currentKbId = kbId;
   const kb = state.kbs.find((item) => item.id === kbId);
@@ -122,11 +160,14 @@ async function loadDocuments() {
       (doc) => `
         <div class="document-item">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-5-4Z"/><path d="M14 3v4h4"/></svg>
-          <span>${escapeHtml(doc.name)}</span>
+          <button class="document-name-button" data-view="${doc.id}">${escapeHtml(doc.name)}</button>
           <button class="icon-button" data-id="${doc.id}" aria-label="删除">×</button>
         </div>`,
     )
     .join("");
+  list.querySelectorAll("button[data-view]").forEach((button) => {
+    button.addEventListener("click", () => openDocumentViewer(button.dataset.view));
+  });
   list.querySelectorAll("button[data-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       await api(`/api/documents/${button.dataset.id}`, { method: "DELETE" });
@@ -416,6 +457,8 @@ function setupEvents() {
   $("#settingsForm").addEventListener("submit", login);
   $("#closeKbPermissions").addEventListener("click", closeKbPermissions);
   $("#addKbPermissionButton").addEventListener("click", addKbPermission);
+  $("#closeDocumentViewer").addEventListener("click", closeDocumentViewer);
+  $("#askDocumentButton").addEventListener("click", askDocument);
 }
 
 async function init() {

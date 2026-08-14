@@ -226,6 +226,11 @@ async def list_document_permissions(document_id: str, principal: CurrentUser) ->
     return service.get_document_permissions(principal.user, document_id)
 
 
+@app.get("/api/documents/{document_id}/content")
+async def get_document_content(document_id: str, principal: CurrentUser) -> dict:
+    return service.get_document_content(principal.user, document_id)
+
+
 @app.post("/api/documents/{document_id}/permissions")
 async def grant_document_permission(document_id: str, payload: GrantPermissionRequest, principal: CurrentUser) -> dict:
     service.grant_document_permission(principal.user, document_id, payload.user_id, payload.role)
