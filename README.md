@@ -30,6 +30,8 @@ python start.py
 
 启动后访问 http://127.0.0.1:8000
 
+也可以双击 `启动知识库.bat`，脚本会自动启动 Docker Desktop、Qdrant、Redis、知识库服务并打开浏览器。
+
 默认管理员账号：
 
 - 用户名：korce
