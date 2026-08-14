@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from typing import AsyncIterator
@@ -113,7 +113,10 @@ class Generator:
                 {"role": "system", "content": rendered["system"]},
                 {"role": "user", "content": rendered["user"]},
             ]
-            return self.generate(messages, temperature=0.0).strip() or query
+            rewritten = self.generate(messages, temperature=0.0).strip() or query
+            if not any(ch.isalnum() or "\u4e00" <= ch <= "\u9fff" for ch in rewritten):
+                return query
+            return rewritten
         except Exception:
             return query
 
@@ -122,3 +125,4 @@ async def stream_text(iterator: AsyncIterator[str]) -> AsyncIterator[str]:
     async for token in iterator:
         yield token
     await asyncio.sleep(0)
+

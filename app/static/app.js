@@ -212,6 +212,7 @@ async function sendMessage() {
   $("#chat").appendChild(assistantRow);
   $("#chat").scrollTop = $("#chat").scrollHeight;
   const content = assistantRow.querySelector(".assistant-content");
+  content.textContent = "正在生成...";
 
   const response = await api("/api/chat/stream", {
     method: "POST",
