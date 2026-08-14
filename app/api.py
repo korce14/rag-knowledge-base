@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated
 
@@ -176,8 +177,16 @@ async def upload_document(
 
     upload_dir = settings.data_dir / "uploads" / kb_id
     upload_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "document.txt").suffix
-    destination = upload_dir / f"{_short_id()}{suffix}"
+    original_name = Path(file.filename or "document.txt").name
+    safe_name = re.sub(r'[<>:"/\\|?*]', "_", original_name).strip(" .")
+    if not safe_name:
+        safe_name = "document"
+    candidate = upload_dir / safe_name
+    if candidate.exists():
+        stem = Path(safe_name).stem
+        suffix = Path(safe_name).suffix
+        candidate = upload_dir / f"{stem}_{_short_id()}{suffix}"
+    destination = candidate
     destination.write_bytes(content)
 
     try:
@@ -198,13 +207,6 @@ async def upload_document(
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"文档解析失败：{exc}") from exc
     return result
-
-
-@app.get("/api/knowledge_bases/{kb_id}/documents")
-async def list_documents(kb_id: str, principal: CurrentUser) -> list[dict]:
-    return service.list_visible_documents(principal.user, kb_id)
-
-
 @app.delete("/api/documents/{document_id}")
 async def remove_document(document_id: str, principal: CurrentUser) -> dict:
     record = service.db.get_document(document_id)
