@@ -234,10 +234,8 @@ async function sendMessage() {
     return;
   }
   const text = await response.text();
-  const frames = text.split("\n\n");
-  for (const frame of frames) {
-    const line = frame.trim();
-    if (!line.startsWith("data:")) continue;
+  const dataLines = text.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("data:"));
+  for (const line of dataLines) {
     const event = JSON.parse(line.slice(5).trim());
     if (event.type === "progress") {
       progress.textContent = event.message;
