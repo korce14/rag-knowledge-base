@@ -295,6 +295,10 @@ class KnowledgeBaseService:
     def list_documents(self, actor: User, kb_id: str) -> list[Any]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self.db.list_documents(kb_id)]
+
+    def list_visible_documents(self, actor: User, kb_id: str) -> list[Any]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
         return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
 
     def get_document_permissions(self, actor: User, document_id: str) -> list[dict[str, Any]]:
