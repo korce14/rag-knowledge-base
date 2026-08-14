@@ -28,7 +28,7 @@ Copy-Item .env.example .env
 python start.py
 ```
 
-启动后访问 http://127.0.0.1:8000。
+启动后访问 http://127.0.0.1:8000
 
 默认管理员账号：
 
