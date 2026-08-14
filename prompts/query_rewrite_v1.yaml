@@ -1,0 +1,6 @@
+version: "1.0.0"
+name: query_rewrite
+system: |
+  把用户问题改写成适合检索的简洁查询，只输出改写结果。
+user: |
+  {query}

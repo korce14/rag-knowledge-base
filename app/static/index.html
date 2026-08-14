@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG 知识库</title>
+  <link rel="stylesheet" href="/styles.css?v=20260814">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div>
+          <div class="brand-title">RAG 知识库</div>
+          <div class="brand-subtitle">本地优先检索助手</div>
+        </div>
+      </div>
+
+      <button id="newKbButton" class="primary-button full-width">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        新建知识库
+      </button>
+
+      <div class="section-label">知识库</div>
+      <div id="kbList" class="kb-list"></div>
+
+      <div id="uploadPanel" class="upload-panel">
+        <div class="section-label">文档导入</div>
+        <label class="file-picker">
+          <input id="fileInput" type="file" multiple accept=".txt,.md,.markdown,.docx,.pdf,.csv,.json,.log">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/></svg>
+          选择文档
+        </label>
+        <input id="tagInput" class="text-input" type="text" placeholder="标签，多个用逗号分隔">
+        <div id="documentList" class="document-list"></div>
+      </div>
+
+      <button id="settingsButton" class="ghost-button full-width">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1A7 7 0 0 0 15 6l-.4-2.5h-4L10.2 6a7 7 0 0 0-1.6 1l-2.4-1-2 3.4L6.2 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.6 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.6-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg>
+        登录 / 用户
+      </button>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div>
+          <h1 id="currentKbName">选择一个知识库</h1>
+          <p id="currentKbDesc">从左侧选择或创建一个知识库开始。</p>
+        </div>
+        <div id="capabilities" class="capabilities"></div>
+      </header>
+
+      <section id="chat" class="chat" aria-live="polite">
+        <div id="emptyState" class="empty-state">
+          <div class="empty-icon">R</div>
+          <h2>开始你的第一个问题</h2>
+          <p>答案会附带可追溯的原文来源。</p>
+        </div>
+      </section>
+
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="questionInput" rows="1" placeholder="输入问题，例如：这份文档的主要结论是什么？"></textarea>
+          <button id="sendButton" class="send-button" aria-label="发送">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3-5-7-2Z"/><path d="m12 14 7-9"/></svg>
+          </button>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <div id="settingsDialog" class="dialog-backdrop hidden">
+    <form id="settingsForm" class="dialog-card">
+      <div class="dialog-header">
+        <h2>登录知识库</h2>
+        <button type="button" id="closeSettings" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <p class="dialog-hint">使用管理员分配的用户名和密码登录。</p>
+      <label class="field-label" for="loginUsername">用户名</label>
+      <input id="loginUsername" class="text-input" type="text" placeholder="admin">
+      <label class="field-label" for="loginPassword">密码</label>
+      <input id="loginPassword" class="text-input" type="password" placeholder="请输入密码">
+      <button class="primary-button full-width" type="submit">登录</button>
+      <button id="logoutButton" class="ghost-button full-width hidden" type="button">退出登录</button>
+    </form>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js?v=20260814"></script>
+</body>
+</html>

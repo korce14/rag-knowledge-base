@@ -1,0 +1,3 @@
+{"question": "苹果有什么营养", "expected_document_names": ["nutrition.txt"]}
+{"question": "量子计算与经典计算的区别", "expected_document_names": ["quantum.txt"]}
+{"question": "公司考勤制度是什么", "expected_document_names": ["hr_policy.txt"]}
