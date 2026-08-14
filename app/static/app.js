@@ -170,6 +170,7 @@ async function uploadDocument() {
   $("#fileInput").value = "";
   $("#tagInput").value = "";
   await loadDocuments();
+  showToast("文档导入完成");
 }
 
 function addMessage(role, text) {
