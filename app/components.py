@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -47,7 +47,7 @@ class AccessControlComponent:
         if not permission or _ROLE_LEVEL[permission.role] < _ROLE_LEVEL[minimum]:
             raise HTTPException(status_code=403, detail="当前用户没有该文档的访问权限")
 
-
+    def visible_documents(self, actor: User, kb_id: str) -> list[Any]:
         if actor.role == Role.ADMIN:
             return self.db.list_documents(kb_id)
         shared_ids = set(self.db.list_shared_document_ids(actor.id))
@@ -58,6 +58,7 @@ class AccessControlComponent:
             elif self.db.get_user_document_permission(actor.id, document.id) or document.id in shared_ids:
                 visible.append(document)
         return visible
+
     def visible_document_ids(self, actor: User, kb_id: str) -> set[str]:
         return {document.id for document in self.visible_documents(actor, kb_id)}
 

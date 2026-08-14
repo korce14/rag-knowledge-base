@@ -7,6 +7,7 @@ from app.models import DocumentRecord, Role
 from app.pipeline_scheduler import AgentStep, CacheStep, GuardStep, PipelineContext, PipelineScheduler, RetrieveStep
 from app.sql_safe import safe_eval_filtered
 from app.storage import Database
+from app.components import AccessControlComponent
 
 
 class FakeGuardResult:
@@ -59,3 +60,16 @@ def test_pipeline_scheduler_stops_on_guard_block():
     context.state["cache_key"] = "qa:test"
     result = PipelineScheduler(steps).run(context)
     assert result["route"] == "blocked"
+
+
+def test_access_control_shared_document_is_visible():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "test.db")
+        kb = db.create_kb("共享库")
+        owner = db.create_user("owner", "hash", Role.EDITOR)
+        viewer = db.create_user("viewer", "hash", Role.VIEWER)
+        doc = DocumentRecord(id="doc_1", kb_id=kb.id, name="s.txt", file_path="s.txt", content_hash="hash", access_mode="restricted")
+        db.add_document(doc)
+        db.share_document(doc.id, viewer.id, owner.id)
+        access = AccessControlComponent(db)
+        assert doc.id in access.visible_document_ids(viewer, kb.id)

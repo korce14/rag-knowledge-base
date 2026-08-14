@@ -334,6 +334,7 @@ async def feedback(payload: dict, principal: CurrentUser) -> dict:
         kb_id=payload.get("kb_id"),
         document_ids=payload.get("document_ids"),
     )
+    return {"ok": True}
 
 def _short_id() -> str:
     import uuid
