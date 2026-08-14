@@ -207,6 +207,11 @@ async def upload_document(
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"文档解析失败：{exc}") from exc
     return result
+
+
+@app.get("/api/knowledge_bases/{kb_id}/documents")
+async def list_documents(kb_id: str, principal: CurrentUser) -> list[dict]:
+    return service.list_visible_documents(principal.user, kb_id)
 @app.delete("/api/documents/{document_id}")
 async def remove_document(document_id: str, principal: CurrentUser) -> dict:
     record = service.db.get_document(document_id)
