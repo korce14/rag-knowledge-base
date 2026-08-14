@@ -439,6 +439,7 @@ class KnowledgeBaseService:
 
         question = self._sanitize(question)
         cache_key = self._qa_cache_key(kb_id, question)
+        yield {"type": "progress", "stage": "cache", "message": "缓存检查中..."}
         cached = self._cached_qa(cache_key)
         if cached is not None:
             return QueryResult(
@@ -489,6 +490,7 @@ class KnowledgeBaseService:
         tags: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
+        yield {"type": "progress", "stage": "guard", "message": "安全校验中..."}
         guard_result = self.guard.validate_input(question)
         if not guard_result.ok:
             yield {"type": "error", "reason": guard_result.reason}
@@ -504,10 +506,12 @@ class KnowledgeBaseService:
             return
 
         rewritten = self.generator.rewrite_query(question)
+        yield {"type": "progress", "stage": "retrieval", "message": "检索知识库中..."}
         hits = self.search_visible(actor, kb_id, rewritten, top_k=top_k, document_id=document_id, tags=tags)
         chunks = [hit.chunk for hit in hits]
         sources = self._format_sources(hits)
         yield {"type": "sources", "sources": sources}
+        yield {"type": "progress", "stage": "generation", "message": "生成回答中..."}
 
         answer_parts: list[str] = []
         if self.generator.available:
@@ -527,6 +531,7 @@ class KnowledgeBaseService:
             yield {"type": "token", "content": answer}
 
         answer = "".join(answer_parts)
+        yield {"type": "progress", "stage": "output_guard", "message": "安全审核中..."}
         output_guard = self.guard.validate_output(question, answer)
         if not output_guard.ok:
             answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"

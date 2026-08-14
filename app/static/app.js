@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   token: localStorage.getItem("rag_token") || "",
   user: JSON.parse(localStorage.getItem("rag_user") || "null"),
   kbs: [],
@@ -208,11 +208,11 @@ async function sendMessage() {
   addMessage("user", question);
   const assistantRow = document.createElement("div");
   assistantRow.className = "message-row";
-  assistantRow.innerHTML = `<div class="message assistant"><div class="assistant-content"></div></div>`;
+  assistantRow.innerHTML = `<div class="message assistant"><div class="assistant-progress hidden"></div><div class="assistant-content"></div></div>`;
   $("#chat").appendChild(assistantRow);
   $("#chat").scrollTop = $("#chat").scrollHeight;
   const content = assistantRow.querySelector(".assistant-content");
-  content.textContent = "正在生成...";
+  const progress = assistantRow.querySelector(".assistant-progress");
 
   const response = await api("/api/chat/stream", {
     method: "POST",
@@ -247,7 +247,12 @@ async function sendMessage() {
       const line = frame.trim();
       if (!line.startsWith("data:")) continue;
       const event = JSON.parse(line.slice(5).trim());
+      if (event.type === "progress") {
+        progress.textContent = event.message;
+        progress.classList.remove("hidden");
+      }
       if (event.type === "token") {
+        progress.classList.add("hidden");
         content.textContent += event.content;
         $("#chat").scrollTop = $("#chat").scrollHeight;
       }
@@ -352,3 +357,4 @@ async function init() {
 }
 
 init();
+

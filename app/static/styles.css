@@ -352,6 +352,12 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.assistant-progress {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .sources {
   display: flex;
   flex-direction: column;
