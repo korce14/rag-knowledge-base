@@ -233,37 +233,29 @@ async function sendMessage() {
     content.textContent = "请求失败，请稍后重试。";
     return;
   }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) {
-      const line = frame.trim();
-      if (!line.startsWith("data:")) continue;
-      const event = JSON.parse(line.slice(5).trim());
-      if (event.type === "progress") {
-        progress.textContent = event.message;
-        progress.classList.remove("hidden");
-      }
-      if (event.type === "token") {
-        progress.classList.add("hidden");
-        content.textContent += event.content;
-        $("#chat").scrollTop = $("#chat").scrollHeight;
-      }
-      if (event.type === "sources") {
-        addSources(assistantRow.querySelector(".message"), event.sources);
-      }
-      if (event.type === "error") {
-        content.textContent = event.reason;
-      }
+  const text = await response.text();
+  const frames = text.split("\n\n");
+  for (const frame of frames) {
+    const line = frame.trim();
+    if (!line.startsWith("data:")) continue;
+    const event = JSON.parse(line.slice(5).trim());
+    if (event.type === "progress") {
+      progress.textContent = event.message;
+      progress.classList.remove("hidden");
+    }
+    if (event.type === "token") {
+      progress.classList.add("hidden");
+      content.textContent += event.content;
+      $("#chat").scrollTop = $("#chat").scrollHeight;
+    }
+    if (event.type === "sources") {
+      addSources(assistantRow.querySelector(".message"), event.sources);
+    }
+    if (event.type === "error") {
+      content.textContent = event.reason;
     }
   }
+  progress.classList.add("hidden");
 }
 
 function resizeTextarea() {
