@@ -61,6 +61,8 @@ class KnowledgeBaseService:
     def _ensure_admin_user(self) -> None:
         if self.db.get_user_by_username(settings.admin_username):
             return
+        if not settings.admin_username or not settings.admin_password:
+            return
         self.db.create_user(
             username=settings.admin_username,
             password_hash=hash_password(settings.admin_password),
@@ -105,6 +107,7 @@ class KnowledgeBaseService:
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         question = self._sanitize(question)
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
         context = PipelineContext(
             actor=actor,
             kb_id=kb_id,
@@ -610,29 +613,10 @@ class KnowledgeBaseService:
             raise HTTPException(status_code=403, detail="当前用户没有该知识库的访问权限")
 
     def _visible_documents(self, actor: User, kb_id: str) -> list[Any]:
-        if actor.role == Role.ADMIN:
-            return self.db.list_documents(kb_id)
-        documents = self.db.list_documents(kb_id)
-        visible: list[Any] = []
-        for document in documents:
-            if document.access_mode == "public":
-                visible.append(document)
-                continue
-            permission = self.db.get_user_document_permission(actor.id, document.id)
-            if permission:
-                visible.append(document)
-        return visible
+        return self.access_control.visible_documents(actor, kb_id)
 
     def _visible_document_ids(self, actor: User, kb_id: str) -> set[str]:
-        return {document.id for document in self._visible_documents(actor, kb_id)}
+        return self.access_control.visible_document_ids(actor, kb_id)
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
-        if actor.role == Role.ADMIN:
-            return
-        if document.access_mode == "public":
-            self._require_kb_access(actor, document.kb_id, minimum)
-            return
-        permission = self.db.get_user_document_permission(actor.id, document.id)
-        if not permission or _ROLE_LEVEL[permission.role] < _ROLE_LEVEL[minimum]:
-            raise HTTPException(status_code=403, detail="当前用户没有该文档的访问权限")
-
+        self.access_control.require_document_access(actor, document, minimum)

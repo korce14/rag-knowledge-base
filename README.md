@@ -20,7 +20,7 @@
 ## 快速开始
 
 ```powershell
-cd D:\桌面\RAG知识库
+cd rag-knowledge-base
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -85,4 +85,5 @@ docker compose up -d
 python scripts/evaluate_rag.py --kb-id <kb_id> --input eval.jsonl
 python scripts/load_test.py --kb-id <kb_id> --concurrency 10 --requests 50
 ```
+
 

@@ -40,7 +40,7 @@ class JsonCache:
             try:
                 return client.get(key)
             except Exception:
-                return None
+                pass
 
         with self._lock:
             item = self._memory.get(key)

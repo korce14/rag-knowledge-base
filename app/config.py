@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     token_expire_minutes: int = 720
-    admin_username: str = "admin"
+    admin_username: str = ""
     admin_password: str = ""
 
     # Prompt 版本
