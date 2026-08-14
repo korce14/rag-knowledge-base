@@ -273,7 +273,7 @@ function resizeTextarea() {
 }
 
 function openAuth() {
-  $("#loginUsername").value = state.user?.username || "";
+  $("#loginUsername").value = state.user?.username || "korce";
   $("#loginPassword").value = "";
   renderAuthState();
   $("#settingsDialog").classList.remove("hidden");
@@ -357,4 +357,5 @@ async function init() {
 }
 
 init();
+
 
