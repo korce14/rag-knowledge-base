@@ -116,6 +116,8 @@ class Generator:
             rewritten = self.generate(messages, temperature=0.0).strip() or query
             if not any(ch.isalnum() or "\u4e00" <= ch <= "\u9fff" for ch in rewritten):
                 return query
+            if "{" in rewritten or "}" in rewritten:
+                return query
             return rewritten
         except Exception:
             return query
