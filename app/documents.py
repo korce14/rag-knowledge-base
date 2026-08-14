@@ -19,7 +19,13 @@ def extract_text(path: Path, filename: str = "") -> str:
         from docx import Document
 
         doc = Document(path)
-        return "\n\n".join(paragraph.text for paragraph in doc.paragraphs)
+        parts = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                if row_text:
+                    parts.append(row_text)
+        return "\n\n".join(parts)
     if suffix in {".pdf"}:
         import pdfplumber
 

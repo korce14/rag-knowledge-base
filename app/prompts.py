@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from pathlib import Path
@@ -43,9 +43,12 @@ class PromptManager:
         return {
             "version": str(data.get("version", "")),
             "name": str(data.get("name", name)),
-            "system": self._template(data.get("system", "")).safe_substitute(variables),
-            "user": self._template(data.get("user", "")).safe_substitute(variables),
+            "system": self._format(data.get("system", ""), variables),
+            "user": self._format(data.get("user", ""), variables),
         }
+
+    def _format(self, text: str, variables: dict[str, Any]) -> str:
+        return text.format(**variables)
 
     def get(self, name: str, version: str | None = None) -> dict[str, Any]:
         path = self._resolve(name, version)
@@ -79,3 +82,4 @@ class PromptManager:
     @staticmethod
     def _template(text: str) -> Template:
         return Template(text)
+

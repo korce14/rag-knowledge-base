@@ -531,6 +531,9 @@ class KnowledgeBaseService:
             yield {"type": "token", "content": answer}
 
         answer = "".join(answer_parts)
+        if chunks and ("无法回答" in answer or "没有找到" in answer or "没有检索到" in answer):
+            answer = fallback_answer(question, chunks)
+            yield {"type": "token", "content": answer}
         yield {"type": "progress", "stage": "output_guard", "message": "安全审核中..."}
         output_guard = self.guard.validate_output(question, answer)
         if not output_guard.ok:
@@ -629,3 +632,4 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+

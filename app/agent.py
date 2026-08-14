@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
 from .generator import Generator
+from .generator import fallback_answer
 from .models import Chunk
 
 
@@ -36,6 +37,8 @@ class RagAgent:
             attempts += 1
             reason = self._check(answer, chunks)
 
+        if chunks and ("无法回答" in answer or "没有找到" in answer or "没有检索到" in answer):
+            return fallback_answer(query, chunks), attempts, "fallback_to_sources"
         return answer, attempts, reason
 
     @staticmethod
