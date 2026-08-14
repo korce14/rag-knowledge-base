@@ -76,12 +76,22 @@ function renderKbs() {
   }
   list.innerHTML = state.kbs
     .map(
-      (kb) =>
-        `<button class="kb-item ${kb.id === state.currentKbId ? "active" : ""}" data-id="${kb.id}">${escapeHtml(kb.name)}</button>`,
+      (kb) => `
+        <div class="kb-item-row ${kb.id === state.currentKbId ? "active" : ""}">
+          <button class="kb-item" data-id="${kb.id}">${escapeHtml(kb.name)}</button>
+          <button class="icon-button small" data-action="permissions" data-id="${kb.id}" aria-label="权限">⚙</button>
+          <button class="icon-button small danger" data-action="delete" data-id="${kb.id}" aria-label="删除">×</button>
+        </div>`,
     )
     .join("");
   list.querySelectorAll(".kb-item").forEach((button) => {
     button.addEventListener("click", () => selectKb(button.dataset.id));
+  });
+  list.querySelectorAll("[data-action=\"permissions\"]").forEach((button) => {
+    button.addEventListener("click", () => openKbPermissions(button.dataset.id));
+  });
+  list.querySelectorAll("[data-action=\"delete\"]").forEach((button) => {
+    button.addEventListener("click", () => deleteKb(button.dataset.id));
   });
 }
 
@@ -124,6 +134,76 @@ async function loadDocuments() {
       await loadDocuments();
     });
   });
+}
+
+async function deleteKb(kbId) {
+  const kb = state.kbs.find((item) => item.id === kbId);
+  if (!window.confirm(`确定删除知识库：${kb?.name || kbId}？`)) return;
+  const response = await api(`/api/knowledge_bases/${kbId}`, { method: "DELETE" });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))).detail || "删除失败";
+    showToast(detail);
+    return;
+  }
+  if (state.currentKbId === kbId) state.currentKbId = null;
+  await loadKbs();
+  showToast("知识库已删除");
+}
+
+async function openKbPermissions(kbId) {
+  state.kbPermissionsKbId = kbId;
+  await loadKbPermissions();
+  $("#kbPermissionsDialog").classList.remove("hidden");
+}
+
+async function loadKbPermissions() {
+  if (!state.kbPermissionsKbId) return;
+  const [usersResponse, permsResponse] = await Promise.all([
+    api("/api/users"),
+    api(`/api/knowledge_bases/${state.kbPermissionsKbId}/permissions`),
+  ]);
+  if (!usersResponse.ok || !permsResponse.ok) return;
+  const users = await usersResponse.json();
+  const permissions = await permsResponse.json();
+  const userSelect = $("#kbPermissionUser");
+  userSelect.innerHTML = users.map((user) => `<option value="${user.id}">${escapeHtml(user.username)}</option>`).join("");
+  const list = $("#kbPermissionList");
+  if (!permissions.length) {
+    list.innerHTML = `<div class="document-item">还没有授权</div>`;
+    return;
+  }
+  list.innerHTML = permissions.map((item) => `
+    <div class="document-item">
+      <span>${escapeHtml(item.user_id)} · ${escapeHtml(item.role)}</span>
+      <button class="icon-button small danger" data-revoke-user="${item.user_id}">×</button>
+    </div>`).join("");
+  list.querySelectorAll("[data-revoke-user]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/knowledge_bases/${state.kbPermissionsKbId}/permissions/${button.dataset.revokeUser}`, { method: "DELETE" });
+      await loadKbPermissions();
+    });
+  });
+}
+
+async function addKbPermission() {
+  if (!state.kbPermissionsKbId) return;
+  const user_id = $("#kbPermissionUser").value;
+  const role = $("#kbPermissionRole").value;
+  const response = await api(`/api/knowledge_bases/${state.kbPermissionsKbId}/permissions`, {
+    method: "POST",
+    body: JSON.stringify({ user_id, role }),
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))).detail || "授权失败";
+    showToast(detail);
+    return;
+  }
+  await loadKbPermissions();
+  showToast("授权已添加");
+}
+
+function closeKbPermissions() {
+  $("#kbPermissionsDialog").classList.add("hidden");
 }
 
 async function createKb() {
@@ -334,6 +414,8 @@ function setupEvents() {
   });
   $("#questionInput").addEventListener("input", resizeTextarea);
   $("#settingsForm").addEventListener("submit", login);
+  $("#closeKbPermissions").addEventListener("click", closeKbPermissions);
+  $("#addKbPermissionButton").addEventListener("click", addKbPermission);
 }
 
 async function init() {

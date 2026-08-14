@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RAG 知识库</title>
-  <link rel="stylesheet" href="/styles.css?v=20260814final4">
+  <link rel="stylesheet" href="/styles.css?v=20260814final5">
 </head>
 <body>
   <div class="app-shell">
@@ -86,11 +86,31 @@
     </form>
   </div>
 
+
+  <div id="kbPermissionsDialog" class="dialog-backdrop hidden">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <h2>知识库权限</h2>
+        <button type="button" id="closeKbPermissions" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <label class="field-label" for="kbPermissionUser">用户</label>
+      <select id="kbPermissionUser" class="text-input"></select>
+      <label class="field-label" for="kbPermissionRole">权限</label>
+      <select id="kbPermissionRole" class="text-input">
+        <option value="viewer">查看者</option>
+        <option value="editor">编辑者</option>
+        <option value="admin">管理员</option>
+      </select>
+      <button id="addKbPermissionButton" class="primary-button full-width" type="button">添加授权</button>
+      <div id="kbPermissionList" class="document-list"></div>
+    </div>
+  </div>
   <div id="toast" class="toast hidden"></div>
 
-  <script src="/app.js?v=20260814final4"></script>
+  <script src="/app.js?v=20260814final5"></script>
 </body>
 </html>
+
 
 
 
