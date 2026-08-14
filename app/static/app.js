@@ -236,7 +236,9 @@ async function sendMessage() {
   const text = await response.text();
   const dataLines = text.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("data:"));
   for (const line of dataLines) {
-    const event = JSON.parse(line.slice(5).trim());
+    const start = line.indexOf("{");
+    const end = line.lastIndexOf("}");
+    const event = JSON.parse(line.slice(start, end + 1));
     if (event.type === "progress") {
       progress.textContent = event.message;
       progress.classList.remove("hidden");
@@ -347,5 +349,6 @@ async function init() {
 }
 
 init();
+
 
 

@@ -319,7 +319,9 @@ async def chat_stream(payload: dict, principal: CurrentUser) -> StreamingRespons
             document_id=payload.get("document_id"),
             tags=payload.get("tags"),
         ):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\\n\\n"
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -344,6 +346,7 @@ def _short_id() -> str:
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
 
 
 
