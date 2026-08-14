@@ -275,8 +275,11 @@ class KnowledgeBaseService:
         if access_mode == "restricted" and actor.role != Role.ADMIN:
             self.db.grant_document_permission(actor.id, record.id, Role.EDITOR)
         if self.embedder.available and chunks:
-            vectors = self.embedder.embed([chunk.text for chunk in chunks])
-            self.vector_store.replace_document(kb_id, record.id, [chunk.id for chunk in chunks], vectors)
+            try:
+                vectors = self.embedder.embed([chunk.text for chunk in chunks])
+                self.vector_store.replace_document(kb_id, record.id, [chunk.id for chunk in chunks], vectors)
+            except Exception as exc:
+                self.logger.event("qdrant_ingest_failed", kb_id=kb_id, document_id=record.id, error=str(exc))
         self.resilience.cache.clear()
         return {
             "document": {
@@ -292,9 +295,6 @@ class KnowledgeBaseService:
     def list_documents(self, actor: User, kb_id: str) -> list[Any]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self.db.list_documents(kb_id)]
-
-    def list_visible_documents(self, actor: User, kb_id: str) -> list[Any]:
-        self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
 
     def get_document_permissions(self, actor: User, document_id: str) -> list[dict[str, Any]]:

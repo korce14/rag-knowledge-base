@@ -132,34 +132,34 @@ class QdrantVectorStore:
     ) -> list[tuple[str, float]]:
         if not self.enabled:
             return []
+        try:
+            client = self._get_client()
+            name = _collection_name(kb_id)
+            if not client.collection_exists(name):
+                return []
 
-        client = self._get_client()
-        name = _collection_name(kb_id)
-        if not client.collection_exists(name):
+            search_limit = max(top_k, 1)
+            if allowed_ids is not None:
+                search_limit = max(search_limit * 4, 20)
+
+            result = client.query_points(
+                collection_name=name,
+                query=np.asarray(query_vector, dtype=np.float32).reshape(1, -1).tolist()[0],
+                limit=search_limit,
+                with_payload=True,
+            ).points
+
+            hits: list[tuple[str, float]] = []
+            for point in result:
+                chunk_id = str(point.payload.get("chunk_id", point.id))
+                if allowed_ids is not None and chunk_id not in allowed_ids:
+                    continue
+                hits.append((chunk_id, float(point.score)))
+                if len(hits) >= top_k:
+                    break
+            return hits
+        except Exception:
             return []
-
-        search_limit = max(top_k, 1)
-        if allowed_ids is not None:
-            search_limit = max(search_limit * 4, 20)
-
-        result = client.query_points(
-            collection_name=name,
-            query=np.asarray(query_vector, dtype=np.float32).reshape(1, -1).tolist()[0],
-            limit=search_limit,
-            with_payload=True,
-        ).points
-
-        hits: list[tuple[str, float]] = []
-        for point in result:
-            chunk_id = str(point.payload.get("chunk_id", point.id))
-            if allowed_ids is not None and chunk_id not in allowed_ids:
-                continue
-            hits.append((chunk_id, float(point.score)))
-            if len(hits) >= top_k:
-                break
-        return hits
-
-    def count(self, kb_id: str) -> int:
         if not self.enabled:
             return 0
         name = _collection_name(kb_id)
