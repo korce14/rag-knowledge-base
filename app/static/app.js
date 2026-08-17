@@ -4,6 +4,7 @@
   kbs: [],
   documents: [],
   currentKbId: null,
+  lastQuestion: "",
   sessionId: localStorage.getItem("rag_session_id") || "",
 };
 
@@ -193,16 +194,17 @@ async function loadSessionMessages() {
   const response = await api(`/api/sessions/${state.sessionId}/messages`);
   if (!response.ok) return;
   const messages = await response.json();
+  let lastQuestion = "";
   for (const message of messages) {
-    addHistoryMessage(message.role, message.content, message.id, message.sources || []);
+    if (message.role === "user") lastQuestion = message.content;
+    addHistoryMessage(message.role, message.content, message.id, message.sources || [], message.role === "assistant" ? lastQuestion : "");
   }
 }
-
-function addHistoryMessage(role, text, messageId, sources = []) {
+function addHistoryMessage(role, text, messageId, sources = [], question = "") {
   const row = addMessage(role, text, messageId);
+  if (question) row.dataset.question = question;
   if (sources.length) addSources(row.querySelector(".message"), sources);
 }
-
 async function clearSessionMessages() {
   if (!state.sessionId) return;
   if (!window.confirm("确定清空当前对话记录？")) return;
@@ -388,8 +390,8 @@ function addMessage(role, text, messageId = null) {
   row.className = "message-row";
   $("#chat").appendChild(row);
   const renderedText = role === "assistant" ? renderMarkdown(text || "") : escapeHtml(text || "");
-  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${renderedText}</div><div class="message-actions"><button class="icon-button small message-copy" aria-label="复制">⧉</button>${messageId ? `<button class="icon-button small danger message-delete" data-message-id="${messageId}" aria-label="删除">×</button>` : ""}</div></div>`;
-  $("#chat").scrollTop = $("#chat").scrollHeight;
+  const assistantExtra = role === "assistant" ? `<button class="icon-button small message-regenerate" aria-label="重新生成">↻</button><button class="icon-button small message-suggest" aria-label="追问建议">?</button>` : "";
+  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${renderedText}</div><div class="message-actions"><button class="icon-button small message-copy" aria-label="复制">⧉</button>${messageId ? `<button class="icon-button small danger message-delete" data-message-id="${messageId}" aria-label="删除">×</button>` : ""}${assistantExtra}</div><div class="message-suggestions"></div></div>`;
   row.querySelector(".message-copy").addEventListener("click", async (event) => {
     event.stopPropagation();
     await navigator.clipboard.writeText(text || "");
@@ -402,6 +404,38 @@ function addMessage(role, text, messageId = null) {
       if (!window.confirm("删除这条消息？")) return;
       const response = await api(`/api/messages/${messageId}`, { method: "DELETE" });
       if (response.ok) row.remove();
+    });
+  }
+  const regenerateButton = row.querySelector(".message-regenerate");
+  if (regenerateButton) {
+    regenerateButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const question = row.dataset.question || state.lastQuestion;
+      if (!question) return;
+      const response = await api("/api/regenerate", {
+        method: "POST",
+        body: JSON.stringify({ kb_id: state.currentKbId, question, session_id: state.sessionId, top_k: 5 }),
+      });
+      const data = await response.json();
+      if (data.answer) {
+        row.querySelector(".assistant-content").innerHTML = renderMarkdown(data.answer);
+        const oldSources = row.querySelector(".sources"); if (oldSources) oldSources.remove();
+        if (data.sources && data.sources.length) addSources(row.querySelector(".message"), data.sources);
+      }
+    });
+  }
+  const suggestButton = row.querySelector(".message-suggest");
+  if (suggestButton) {
+    suggestButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const question = row.dataset.question || state.lastQuestion;
+      const response = await api("/api/suggest", {
+        method: "POST",
+        body: JSON.stringify({ question, answer: text }),
+      });
+      const data = await response.json();
+      const box = row.querySelector(".message-suggestions");
+      box.innerHTML = (data.suggestions || []).map((s) => `<button class="ghost-button suggestion-button" type="button">${escapeHtml(s)}</button>`).join("");
     });
   }
   return row;
@@ -429,8 +463,10 @@ async function sendMessage() {
   input.value = "";
   resizeTextarea();
   addMessage("user", question);
+  state.lastQuestion = question;
   const assistantRow = document.createElement("div");
   assistantRow.className = "message-row";
+  assistantRow.dataset.question = question;
   assistantRow.innerHTML = `<div class="message assistant"><div class="assistant-progress hidden"></div><div class="assistant-content"></div></div>`;
   $("#chat").appendChild(assistantRow);
   $("#chat").scrollTop = $("#chat").scrollHeight;

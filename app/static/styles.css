@@ -383,6 +383,19 @@ textarea:focus {
   transition: opacity 0.15s ease;
 }
 
+.message-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.suggestion-button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .message-row:hover .message-actions .icon-button {
   opacity: 1;
 }

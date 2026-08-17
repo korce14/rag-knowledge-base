@@ -133,6 +133,14 @@ class Database:
                     sources_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '新会话',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
 
                 CREATE TABLE IF NOT EXISTS feedback (
@@ -604,6 +612,26 @@ class Database:
         with self.connection() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+    def create_session(self, session_id: str, user_id: str, title: str = "新会话") -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO sessions(id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, user_id, title, _now(), _now()),
+            )
+
+    def list_sessions(self, user_id: str) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            rows = conn.execute("SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_session(self, session_id: str, user_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+
+    def rename_session(self, session_id: str, user_id: str, title: str) -> None:
+        with self.connection() as conn:
+            conn.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?", (title, _now(), session_id, user_id))
     def add_audit_log(self, user_id: str, action: str, resource_type: str, resource_id: str, detail: str = "") -> None:
         with self.connection() as conn:
             conn.execute(

@@ -350,6 +350,15 @@ async def chat_stream(payload: dict, principal: CurrentUser) -> StreamingRespons
 
 
 
+
+@app.get("/api/sessions")
+async def list_sessions(principal: CurrentUser) -> list[dict]:
+    return service.list_sessions(principal.user)
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str, principal: CurrentUser) -> dict:
+    service.delete_session(principal.user, session_id)
+    return {"ok": True}
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str, principal: CurrentUser) -> list[dict]:
     return service.list_session_messages(principal.user, session_id)
@@ -363,6 +372,27 @@ async def clear_session_messages(session_id: str, principal: CurrentUser) -> dic
 async def delete_message(message_id: int, principal: CurrentUser) -> dict:
     service.delete_message(principal.user, message_id)
     return {"ok": True}
+
+@app.post("/api/regenerate")
+async def regenerate(payload: dict, principal: CurrentUser) -> dict:
+    result = service.regenerate_answer(
+        principal.user,
+        str(payload.get("kb_id", "")),
+        str(payload.get("question", "")),
+        str(payload.get("session_id", "default")),
+        int(payload.get("top_k", settings.top_k)),
+        payload.get("document_id"),
+        payload.get("tags"),
+    )
+    return result
+
+@app.post("/api/suggest")
+async def suggest(payload: dict, principal: CurrentUser) -> dict:
+    suggestions = service.suggest_questions(
+        str(payload.get("question", "")),
+        str(payload.get("answer", "")),
+    )
+    return {"suggestions": suggestions}
 @app.post("/api/feedback")
 async def feedback(payload: dict, principal: CurrentUser) -> dict:
     service.feedback(

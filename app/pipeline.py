@@ -110,6 +110,7 @@ class KnowledgeBaseService:
     ) -> dict[str, Any]:
         question = self._sanitize(question)
         self._require_kb_access(actor, kb_id, Role.VIEWER)
+        self.ensure_session(actor, session_id)
         context = PipelineContext(
             actor=actor,
             kb_id=kb_id,
@@ -523,6 +524,7 @@ class KnowledgeBaseService:
         tags: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
+        self.ensure_session(actor, session_id)
         yield {"type": "progress", "stage": "guard", "message": "安全校验中..."}
         guard_result = self.guard.validate_input(question)
         if not guard_result.ok:
@@ -584,6 +586,35 @@ class KnowledgeBaseService:
 
     def list_session_messages(self, actor: User, session_id: str) -> list[dict[str, str]]:
         return self.db.list_messages(session_id, actor.id, limit=100)
+
+    def regenerate_answer(self, actor: User, kb_id: str, question: str, session_id: str, top_k: int, document_id: str | None, tags: list[str] | None) -> dict[str, Any]:
+        return self.query_pipeline(actor, kb_id, question, session_id, top_k, document_id, tags)
+
+    def suggest_questions(self, question: str, answer: str) -> list[str]:
+        if not self.generator.available:
+            return []
+        try:
+            rendered = self.prompts.render("query_rewrite", {"query": question})
+            messages = [
+                {"role": "system", "content": "根据用户问题和回答，给出 3 个自然的中文追问问题。只输出问题，每行一个。"},
+                {"role": "user", "content": f"问题：{question}\n回答：{answer}"},
+            ]
+            text = self.generator.generate(messages, temperature=0.2).strip()
+            return [line.strip() for line in text.splitlines() if line.strip()][:3]
+        except Exception:
+            return []
+
+    def ensure_session(self, actor: User, session_id: str) -> None:
+        sessions = self.db.list_sessions(actor.id)
+        if not any(item["id"] == session_id for item in sessions):
+            self.db.create_session(session_id, actor.id)
+
+    def list_sessions(self, actor: User) -> list[dict[str, Any]]:
+        return self.db.list_sessions(actor.id)
+
+    def delete_session(self, actor: User, session_id: str) -> None:
+        self.db.delete_session(session_id, actor.id)
+        self.db.delete_session_messages(session_id, actor.id)
 
     def clear_session_messages(self, actor: User, session_id: str) -> None:
         self.db.delete_session_messages(session_id, actor.id)
