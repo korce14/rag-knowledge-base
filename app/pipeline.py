@@ -612,6 +612,15 @@ class KnowledgeBaseService:
     def list_sessions(self, actor: User) -> list[dict[str, Any]]:
         return self.db.list_sessions(actor.id)
 
+    def create_session(self, actor: User, session_id: str | None = None, title: str = "新会话") -> dict[str, Any]:
+        import uuid
+        session_id = session_id or f"session_{uuid.uuid4().hex[:12]}"
+        self.db.create_session(session_id, actor.id, title)
+        return {"id": session_id, "title": title}
+
+    def rename_session(self, actor: User, session_id: str, title: str) -> None:
+        self.db.rename_session(session_id, actor.id, title)
+
     def delete_session(self, actor: User, session_id: str) -> None:
         self.db.delete_session(session_id, actor.id)
         self.db.delete_session_messages(session_id, actor.id)
@@ -680,10 +689,25 @@ class KnowledgeBaseService:
 
     def list_retrieval_gaps(self, actor: User, kb_id: str | None = None) -> list[dict[str, Any]]:
         self._require_global_role(actor, Role.ADMIN)
+
+    def retrieval_gap_summary(self, actor: User) -> dict[str, Any]:
+        self._require_global_role(actor, Role.ADMIN)
+        gaps = self.db.list_retrieval_gaps(limit=500)
+        grouped: dict[str, int] = {}
+        for gap in gaps:
+            grouped[gap["question"]] = grouped.get(gap["question"], 0) + 1
+        top = sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:10]
+        return {"total": len(gaps), "unresolved": sum(1 for item in gaps if not item["resolved"]), "top": [{"question": q, "count": c} for q, c in top]}
         return self.db.list_retrieval_gaps(kb_id)
 
     def prompt_versions(self) -> dict[str, Any]:
         return self.guard.prompt_version()
+
+    def route_query(self, question: str) -> str:
+        lowered = question.lower()
+        if any(word in lowered for word in ["计算", "画图", "绘图", "sql", "查询数据"]):
+            return "agent"
+        return "rag"
 
     # 内部辅助
 

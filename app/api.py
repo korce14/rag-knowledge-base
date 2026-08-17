@@ -88,6 +88,10 @@ async def get_settings(principal: CurrentUser) -> dict:
 
 
 
+
+@app.get("/api/analytics/gaps/summary")
+async def retrieval_gap_summary(principal: CurrentUser) -> dict:
+    return service.retrieval_gap_summary(principal.user)
 @app.get("/api/analytics/gaps")
 async def list_retrieval_gaps(principal: CurrentUser, kb_id: str | None = None) -> list[dict]:
     return service.list_retrieval_gaps(principal.user, kb_id)
@@ -308,6 +312,10 @@ async def search(payload: dict, principal: CurrentUser) -> dict:
     }
 
 
+
+@app.post("/api/route")
+async def route(payload: dict, principal: CurrentUser) -> dict:
+    return {"route": service.route_query(str(payload.get("question", "")))}
 @app.post("/api/chat")
 async def chat(payload: dict, principal: CurrentUser) -> dict:
     kb_id = str(payload.get("kb_id", "")).strip()
@@ -351,6 +359,15 @@ async def chat_stream(payload: dict, principal: CurrentUser) -> StreamingRespons
 
 
 
+
+@app.post("/api/sessions")
+async def create_session(payload: dict, principal: CurrentUser) -> dict:
+    return service.create_session(principal.user, payload.get("session_id"), str(payload.get("title", "新会话")))
+
+@app.post("/api/sessions/{session_id}/title")
+async def rename_session(session_id: str, payload: dict, principal: CurrentUser) -> dict:
+    service.rename_session(principal.user, session_id, str(payload.get("title", "新会话")))
+    return {"ok": True}
 @app.get("/api/sessions")
 async def list_sessions(principal: CurrentUser) -> list[dict]:
     return service.list_sessions(principal.user)
