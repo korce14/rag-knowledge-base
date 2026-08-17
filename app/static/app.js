@@ -35,6 +35,7 @@ function escapeHtml(value) {
 }
 
 function renderMarkdown(text) {
+  if (window.marked) return window.marked.parse(text || "");
   const escaped = escapeHtml(text);
   const withCode = escaped.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
   const withInline = withCode.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -146,6 +147,54 @@ async function askDocument() {
 
 async function selectKb(kbId) {
   state.currentKbId = kbId;
+
+async function loadSessions() {
+  const response = await api("/api/sessions");
+  if (!response.ok) return;
+  const sessions = await response.json();
+  const list = $("#sessionList");
+  if (!sessions.length) {
+    list.innerHTML = `<div class="document-item">没有会话</div>`;
+    return;
+  }
+  list.innerHTML = sessions.map((session) => `
+    <button class="session-item ${session.id === state.sessionId ? "active" : ""}" data-session-id="${session.id}">
+      <span>${escapeHtml(session.title)}</span>
+      <button class="icon-button small danger session-delete" data-session-delete="${session.id}">×</button>
+    </button>`).join("");
+  list.querySelectorAll("[data-session-id]").forEach((button) => {
+    button.addEventListener("click", () => selectSession(button.dataset.sessionId));
+  });
+  list.querySelectorAll("[data-session-delete]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await api(`/api/sessions/${button.dataset.sessionDelete}`, { method: "DELETE" });
+      if (state.sessionId === button.dataset.sessionDelete) {
+        state.sessionId = ""; localStorage.removeItem("rag_session_id");
+      }
+      await loadSessions();
+    });
+  });
+}
+
+function selectSession(sessionId) {
+  state.sessionId = sessionId;
+  localStorage.setItem("rag_session_id", sessionId);
+  $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+  loadSessionMessages();
+  loadSessions();
+}
+
+async function createSession() {
+  const response = await api("/api/sessions", { method: "POST", body: JSON.stringify({ title: "新会话" }) });
+  if (response.ok) {
+    const session = await response.json();
+    state.sessionId = session.id;
+    localStorage.setItem("rag_session_id", session.id);
+    $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+    await loadSessions();
+  }
+}
   const kb = state.kbs.find((item) => item.id === kbId);
   $("#currentKbName").textContent = kb?.name || "未命名知识库";
   $("#currentKbDesc").textContent = kb?.description || "从这个知识库中检索并回答问题。";
@@ -592,11 +641,13 @@ async function login(event) {
   renderAuthState();
   await loadSettings();
   await loadKbs();
+  await loadSessions();
   showToast(`已登录：${state.user.username}`);
 }
 
 function setupEvents() {
   $("#newKbButton").addEventListener("click", createKb);
+  $("#newSessionButton").addEventListener("click", createSession);
   $("#settingsButton").addEventListener("click", openAuth);
   $("#usersButton").addEventListener("click", openUsers);
   $("#closeSettings").addEventListener("click", closeAuth);
@@ -633,6 +684,7 @@ async function init() {
   if (state.token) {
     await loadSettings();
     await loadKbs();
+    await loadSessions();
   } else {
     openAuth();
   }

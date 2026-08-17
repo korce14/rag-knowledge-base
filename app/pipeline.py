@@ -621,6 +621,21 @@ class KnowledgeBaseService:
     def rename_session(self, actor: User, session_id: str, title: str) -> None:
         self.db.rename_session(session_id, actor.id, title)
 
+    def summarize_session(self, actor: User, session_id: str) -> str:
+        messages = self.db.list_messages(session_id, actor.id, limit=50)
+        if not self.generator.available or not messages:
+            return ""
+        try:
+            transcript = "".join(f"{m['role']}: {m['content'][:500]}" for m in messages[-20:])
+            text = self.generator.generate([
+                {"role": "system", "content": "用 3 句话总结这段对话，只输出总结。"},
+                {"role": "user", "content": transcript},
+            ], temperature=0.2)
+            self.db.update_session_summary(session_id, actor.id, text.strip())
+            return text.strip()
+        except Exception:
+            return ""
+
     def delete_session(self, actor: User, session_id: str) -> None:
         self.db.delete_session(session_id, actor.id)
         self.db.delete_session_messages(session_id, actor.id)

@@ -410,6 +410,11 @@ async def suggest(payload: dict, principal: CurrentUser) -> dict:
         str(payload.get("answer", "")),
     )
     return {"suggestions": suggestions}
+
+@app.post("/api/sessions/{session_id}/summary")
+async def summarize_session(session_id: str, principal: CurrentUser) -> dict:
+    summary = service.summarize_session(principal.user, session_id)
+    return {"summary": summary}
 @app.post("/api/feedback")
 async def feedback(payload: dict, principal: CurrentUser) -> dict:
     service.feedback(

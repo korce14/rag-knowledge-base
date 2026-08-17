@@ -704,3 +704,40 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.session-item:hover {
+  background: #eef2f5;
+}
+
+.session-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.session-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

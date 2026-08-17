@@ -138,6 +138,7 @@ class Database:
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL DEFAULT '新会话',
+                    summary TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -184,6 +185,7 @@ class Database:
         self._ensure_column("feedback", "document_id", "TEXT")
         self._ensure_column("messages", "user_id", "TEXT")
         self._ensure_column("messages", "sources_json", "TEXT NOT NULL DEFAULT '[]'")
+        self._ensure_column("sessions", "summary", "TEXT NOT NULL DEFAULT ''")
 
     # 知识库
 
@@ -629,6 +631,10 @@ class Database:
         with self.connection() as conn:
             conn.execute("DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
 
+
+    def update_session_summary(self, session_id: str, user_id: str, summary: str) -> None:
+        with self.connection() as conn:
+            conn.execute("UPDATE sessions SET summary = ? WHERE id = ? AND user_id = ?", (summary, session_id, user_id))
     def rename_session(self, session_id: str, user_id: str, title: str) -> None:
         with self.connection() as conn:
             conn.execute("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?", (title, _now(), session_id, user_id))
