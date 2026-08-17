@@ -4,7 +4,7 @@
   kbs: [],
   documents: [],
   currentKbId: null,
-  sessionId: crypto.randomUUID(),
+  sessionId: localStorage.getItem("rag_session_id") || "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -152,6 +152,7 @@ async function selectKb(kbId) {
   $("#uploadPanel").classList.remove("hidden");
   $("#emptyState").classList.remove("hidden");
   $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+  await loadSessionMessages();
   await loadDocuments();
 }
 
@@ -185,6 +186,27 @@ async function loadDocuments() {
       await loadDocuments();
     });
   });
+}
+
+async function loadSessionMessages() {
+  if (!state.sessionId || !state.currentKbId) return;
+  const response = await api(`/api/sessions/${state.sessionId}/messages`);
+  if (!response.ok) return;
+  const messages = await response.json();
+  for (const message of messages) {
+    addMessage(message.role, message.content);
+  }
+}
+
+async function clearSessionMessages() {
+  if (!state.sessionId) return;
+  if (!window.confirm("确定清空当前对话记录？")) return;
+  const response = await api(`/api/sessions/${state.sessionId}/messages`, { method: "DELETE" });
+  if (response.ok) {
+    $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+    $("#emptyState").classList.remove("hidden");
+    showToast("对话记录已清空");
+  }
 }
 
 async function deleteKb(kbId) {
@@ -527,6 +549,7 @@ function setupEvents() {
   });
   $("#fileInput").addEventListener("change", uploadDocument);
   $("#sendButton").addEventListener("click", sendMessage);
+  $("#clearHistoryButton").addEventListener("click", clearSessionMessages);
   $("#questionInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -545,6 +568,10 @@ function setupEvents() {
 
 async function init() {
   setupEvents();
+  if (!state.sessionId) {
+    state.sessionId = crypto.randomUUID();
+    localStorage.setItem("rag_session_id", state.sessionId);
+  }
   renderAuthState();
   if (state.token) {
     await loadSettings();
@@ -556,6 +583,7 @@ async function init() {
 }
 
 init();
+
 
 
 

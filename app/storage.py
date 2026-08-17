@@ -539,6 +539,10 @@ class Database:
                 (session_id, role, content, user_id, _now()),
             )
 
+    def delete_session_messages(self, session_id: str, user_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("DELETE FROM messages WHERE session_id = ? AND user_id = ?", (session_id, user_id))
+
 
     def list_messages(self, session_id: str, user_id: str | None = None, limit: int = 12) -> list[dict[str, str]]:
         sql = "SELECT role, content FROM messages WHERE session_id = ?"

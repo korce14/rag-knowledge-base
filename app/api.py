@@ -345,6 +345,15 @@ async def chat_stream(payload: dict, principal: CurrentUser) -> StreamingRespons
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+
+@app.get("/api/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str, principal: CurrentUser) -> list[dict]:
+    return service.list_session_messages(principal.user, session_id)
+
+@app.delete("/api/sessions/{session_id}/messages")
+async def clear_session_messages(session_id: str, principal: CurrentUser) -> dict:
+    service.clear_session_messages(principal.user, session_id)
+    return {"ok": True}
 @app.post("/api/feedback")
 async def feedback(payload: dict, principal: CurrentUser) -> dict:
     service.feedback(

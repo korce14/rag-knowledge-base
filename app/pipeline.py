@@ -579,6 +579,12 @@ class KnowledgeBaseService:
     def feedback(self, session_id: str, question: str, answer: str, rating: str, kb_id: str | None = None, document_ids: list[str] | None = None) -> None:
         from .feedback import record_feedback
         record_feedback(self.db, session_id, question, answer, rating, kb_id=kb_id, document_ids=document_ids)
+
+    def list_session_messages(self, actor: User, session_id: str) -> list[dict[str, str]]:
+        return self.db.list_messages(session_id, actor.id, limit=100)
+
+    def clear_session_messages(self, actor: User, session_id: str) -> None:
+        self.db.delete_session_messages(session_id, actor.id)
     # 缓存
 
     def _qa_cache_key(self, kb_id: str, question: str, user_id: str) -> str:
