@@ -354,6 +354,11 @@ async def get_session_messages(session_id: str, principal: CurrentUser) -> list[
 async def clear_session_messages(session_id: str, principal: CurrentUser) -> dict:
     service.clear_session_messages(principal.user, session_id)
     return {"ok": True}
+
+@app.delete("/api/messages/{message_id}")
+async def delete_message(message_id: int, principal: CurrentUser) -> dict:
+    service.delete_message(principal.user, message_id)
+    return {"ok": True}
 @app.post("/api/feedback")
 async def feedback(payload: dict, principal: CurrentUser) -> dict:
     service.feedback(

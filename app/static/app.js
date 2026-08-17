@@ -194,8 +194,22 @@ async function loadSessionMessages() {
   if (!response.ok) return;
   const messages = await response.json();
   for (const message of messages) {
-    addMessage(message.role, message.content);
+    addHistoryMessage(message.role, message.content, message.id);
   }
+}
+
+function addHistoryMessage(role, text, messageId) {
+  $("#emptyState").classList.add("hidden");
+  const row = document.createElement("div");
+  row.className = "message-row";
+  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${escapeHtml(text) || ""}</div><button class="icon-button small history-delete" data-message-id="${messageId}">×</button></div>`;
+  $("#chat").appendChild(row);
+  row.querySelector(".history-delete").addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!window.confirm("删除这条消息？")) return;
+    const response = await api(`/api/messages/${messageId}`, { method: "DELETE" });
+    if (response.ok) row.remove();
+  });
 }
 
 async function clearSessionMessages() {
@@ -583,6 +597,7 @@ async function init() {
 }
 
 init();
+
 
 
 

@@ -539,13 +539,22 @@ class Database:
                 (session_id, role, content, user_id, _now()),
             )
 
+
+    def get_message(self, message_id: int) -> dict[str, Any] | None:
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete_message(self, message_id: int, user_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("DELETE FROM messages WHERE id = ? AND user_id = ?", (message_id, user_id))
     def delete_session_messages(self, session_id: str, user_id: str) -> None:
         with self.connection() as conn:
             conn.execute("DELETE FROM messages WHERE session_id = ? AND user_id = ?", (session_id, user_id))
 
 
     def list_messages(self, session_id: str, user_id: str | None = None, limit: int = 12) -> list[dict[str, str]]:
-        sql = "SELECT role, content FROM messages WHERE session_id = ?"
+        sql = "SELECT id, role, content FROM messages WHERE session_id = ?"
         params: list[Any] = [session_id]
         if user_id is not None:
             sql += " AND user_id = ?"
@@ -554,7 +563,7 @@ class Database:
         params.append(limit)
         with self.connection() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+        return [{"id": row["id"], "role": row["role"], "content": row["content"]} for row in reversed(rows)]
 
     def add_feedback(self, session_id: str, question: str, answer: str, rating: str) -> None:
         with self.connection() as conn:
@@ -602,5 +611,6 @@ def _new_id(prefix: str) -> str:
     import uuid
 
     return f"{prefix}_{uuid.uuid4().hex}"
+
 
 

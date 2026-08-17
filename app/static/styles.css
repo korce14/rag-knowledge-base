@@ -360,6 +360,21 @@ textarea:focus {
   border-radius: 8px;
 }
 
+.message {
+  position: relative;
+}
+
+.history-delete {
+  display: none;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+}
+
+.message-row:hover .history-delete {
+  display: grid;
+}
+
 .message.user {
   margin-left: auto;
   max-width: 80%;

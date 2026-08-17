@@ -585,6 +585,12 @@ class KnowledgeBaseService:
 
     def clear_session_messages(self, actor: User, session_id: str) -> None:
         self.db.delete_session_messages(session_id, actor.id)
+
+    def delete_message(self, actor: User, message_id: int) -> None:
+        message = self.db.get_message(message_id)
+        if not message or message.get("user_id") != actor.id:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        self.db.delete_message(message_id, actor.id)
     # 缓存
 
     def _qa_cache_key(self, kb_id: str, question: str, user_id: str) -> str:
