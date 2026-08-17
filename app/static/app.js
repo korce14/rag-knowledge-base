@@ -198,8 +198,9 @@ async function loadSessionMessages() {
   }
 }
 
-function addHistoryMessage(role, text, messageId) {
-  addMessage(role, text, messageId);
+function addHistoryMessage(role, text, messageId, sources = []) {
+  const row = addMessage(role, text, messageId);
+  if (sources.length) addSources(row.querySelector(".message"), sources);
 }
 
 async function clearSessionMessages() {
