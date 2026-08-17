@@ -50,6 +50,10 @@ class Settings(BaseSettings):
 
     # 权限认证
     auth_token: str = ""
+    cors_origins: str = "http://127.0.0.1:8000"
+    login_rate_limit_per_minute: int = 10
+    api_rate_limit_per_minute: int = 120
+    audit_enabled: bool = True
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     token_expire_minutes: int = 720

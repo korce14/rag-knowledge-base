@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from .auth import AuthPrincipal, CurrentUser, get_current_user
 from .config import settings
 from .models import Role
+from .rate_limit import RateLimitMiddleware
 from .pipeline import KnowledgeBaseService
 
 
@@ -49,11 +50,12 @@ app = FastAPI(title="RAG 知识库", version="2.0.0")
 app.state.service = service
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.get("/health")
@@ -358,6 +360,7 @@ def _short_id() -> str:
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
 
 
 

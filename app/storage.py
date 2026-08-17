@@ -125,6 +125,7 @@ class Database:
                     session_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    user_id TEXT,
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
@@ -140,6 +141,16 @@ class Database:
                     document_id TEXT,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource_type TEXT NOT NULL,
+                    resource_id TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -148,6 +159,7 @@ class Database:
         self._ensure_column("feedback", "rating_value", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("feedback", "kb_id", "TEXT")
         self._ensure_column("feedback", "document_id", "TEXT")
+        self._ensure_column("messages", "user_id", "TEXT")
 
     # 知识库
 
@@ -516,20 +528,13 @@ class Database:
 
     # 对话与反馈
 
-    def add_message(self, session_id: str, role: str, content: str) -> None:
+    def add_message(self, session_id: str, role: str, content: str, user_id: str | None = None) -> None:
         with self.connection() as conn:
             conn.execute(
-                "INSERT INTO messages(session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, role, content, _now()),
+                "INSERT INTO messages(session_id, role, content, user_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, role, content, user_id, _now()),
             )
 
-    def list_messages(self, session_id: str, limit: int = 12) -> list[dict[str, str]]:
-        with self.connection() as conn:
-            rows = conn.execute(
-                "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
-        return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
 
     def add_feedback(self, session_id: str, question: str, answer: str, rating: str) -> None:
         with self.connection() as conn:

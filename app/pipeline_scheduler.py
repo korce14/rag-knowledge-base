@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -113,7 +113,7 @@ class AgentStep(PipelineStep):
         session_id = context.session_id
         sources = context.state.get("sources", [])
         try:
-            answer_text, attempts, reason = self.answer(question, chunks, self.record("history", session_id))
+            answer_text, attempts, reason = self.answer(question, chunks, self.record("history", session_id, context.actor.id))
         except Exception:
             answer_text = self.fallback(question, chunks)
             attempts = 0
@@ -123,7 +123,7 @@ class AgentStep(PipelineStep):
         if not checked.ok:
             answer_text = "回答被安全策略拦截，请尝试更具体或合规的问题。"
 
-        self.record("messages", session_id, question, answer_text)
+        self.record("messages", session_id, question, answer_text, context.actor.id)
         self.cache_write(context.state["cache_key"], answer_text, sources)
         context.result = {
             "answer": answer_text,
@@ -146,3 +146,4 @@ class PipelineScheduler:
             if not step.run(context):
                 return context.result or {}
         return context.result or {}
+

@@ -55,6 +55,7 @@ class KnowledgeBaseService:
         self.retrieval_adjustment = RetrievalAdjustmentComponent(self.feedback_weights)
         self.observability = ObservabilityComponent(self.logger)
         self.pipeline_scheduler = self._build_pipeline_scheduler()
+        self._retriever_cache: dict[tuple[str, ...], Retriever] = {}
         self._ensure_admin_user()
 
     # 初始化与用户
@@ -71,17 +72,17 @@ class KnowledgeBaseService:
         )
 
     def _build_pipeline_scheduler(self) -> PipelineScheduler:
-        def history_loader(_: str, session_id: str):
-            return self.db.list_messages(session_id)
+        def history_loader(_: str, session_id: str, user_id: str):
+            return self.db.list_messages(session_id, user_id)
 
-        def message_recorder(_: str, session_id: str, question: str, answer: str):
-            self.db.add_message(session_id, "user", question)
-            self.db.add_message(session_id, "assistant", answer)
+        def message_recorder(_: str, session_id: str, question: str, answer: str, user_id: str):
+            self.db.add_message(session_id, "user", question, user_id)
+            self.db.add_message(session_id, "assistant", answer, user_id)
 
-        def record(kind: str, session_id: str, question: str | None = None, answer: str | None = None):
+        def record(kind: str, session_id: str, question: str | None = None, answer: str | None = None, user_id: str | None = None):
             if kind == "history":
-                return history_loader("history", session_id)
-            message_recorder("messages", session_id, question, answer)
+                return history_loader("history", session_id, user_id)
+            message_recorder("messages", session_id, question, answer, user_id)
 
         steps = [
             GuardStep(self.guard.validate_input),
@@ -118,7 +119,7 @@ class KnowledgeBaseService:
             document_id=document_id,
             tags=tags,
         )
-        context.state["cache_key"] = self._qa_cache_key(kb_id, question)
+        context.state["cache_key"] = self._qa_cache_key(kb_id, question, actor.id)
         result = self.pipeline_scheduler.run(context)
         self.logger.event("pipeline_done", kb_id=kb_id, route=result.get("route"), result_count=len(result.get("sources", [])))
         return result
@@ -132,6 +133,7 @@ class KnowledgeBaseService:
 
         if not verify_password(password, user.password_hash):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
+        self.db.add_audit_log(user.id, "login", "user", user.id, user.username)
         return user
     def list_users(self, actor: User) -> list[User]:
         self._require_global_role(actor, Role.ADMIN)
@@ -186,6 +188,7 @@ class KnowledgeBaseService:
         if _ROLE_LEVEL[actor.role] < _ROLE_LEVEL[Role.EDITOR]:
             raise HTTPException(status_code=403, detail="当前用户没有创建知识库的权限")
         kb = self.db.create_kb(name, description)
+        self.db.add_audit_log(actor.id, "create", "kb", kb.id, name)
         if actor.role != Role.ADMIN:
             self.db.grant_kb_permission(actor.id, kb.id, Role.EDITOR)
         return kb
@@ -195,7 +198,9 @@ class KnowledgeBaseService:
         if not self.db.get_kb(kb_id):
             raise HTTPException(status_code=404, detail="知识库不存在")
         self.db.delete_kb(kb_id)
+        self.db.add_audit_log(actor.id, "delete", "kb", kb_id, "")
         self.vector_store.delete_kb(kb_id)
+        self._invalidate_retriever_cache(kb_id)
         self.resilience.cache.clear()
 
     def get_kb_permissions(self, actor: User, kb_id: str) -> list[dict[str, Any]]:
@@ -264,7 +269,9 @@ class KnowledgeBaseService:
         if not record:
             raise HTTPException(status_code=404, detail="文档不存在")
         self._require_document_access(actor, record, Role.EDITOR)
+        self.db.add_audit_log(actor.id, "delete", "document", document_id, record.name)
         delete_document(self.db, self.vector_store, record.kb_id, document_id)
+        self._invalidate_retriever_cache(record.kb_id)
         self.resilience.cache.clear()
 
     def ingest_path_with_mode(self, actor: User, kb_id: str, file_path: Path, tags: list[str] | None = None, access_mode: str = "public") -> dict[str, Any]:
@@ -273,6 +280,7 @@ class KnowledgeBaseService:
         if not guard_result.ok:
             raise HTTPException(status_code=400, detail=guard_result.reason)
         record, chunks = ingest_file_with_mode(self.db, kb_id, file_path, tags, access_mode)
+        self.db.add_audit_log(actor.id, "upload", "document", record.id, record.name)
         if access_mode == "restricted" and actor.role != Role.ADMIN:
             self.db.grant_document_permission(actor.id, record.id, Role.EDITOR)
         if self.embedder.available and chunks:
@@ -282,6 +290,7 @@ class KnowledgeBaseService:
             except Exception as exc:
                 self.logger.event("qdrant_ingest_failed", kb_id=kb_id, document_id=record.id, error=str(exc))
         self.resilience.cache.clear()
+        self._invalidate_retriever_cache(kb_id)
         return {
             "document": {
                 "id": record.id,
@@ -387,6 +396,14 @@ class KnowledgeBaseService:
         chunks = self.db.list_chunks(kb_id)
         return Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
 
+    def _invalidate_retriever_cache(self, kb_id: str | None = None) -> None:
+        if kb_id is None:
+            self._retriever_cache.clear()
+            return
+        for key in list(self._retriever_cache):
+            if key[0] == kb_id:
+                self._retriever_cache.pop(key, None)
+
     def get_retriever_for_documents(self, kb_id: str, document_ids: list[str]) -> Retriever:
         chunks = self.db.list_chunks_by_documents(kb_id, document_ids)
         return Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
@@ -447,7 +464,7 @@ class KnowledgeBaseService:
             return QueryResult(answer=guard_result.reason, sources=[], route="blocked", elapsed_ms=0)
 
         question = self._sanitize(question)
-        cache_key = self._qa_cache_key(kb_id, question)
+        cache_key = self._qa_cache_key(kb_id, question, actor.id)
         yield {"type": "progress", "stage": "cache", "message": "缓存检查中..."}
         cached = self._cached_qa(cache_key)
         if cached is not None:
@@ -464,7 +481,7 @@ class KnowledgeBaseService:
         sources = self._format_sources(hits)
 
         if self.generator.available:
-            history = self.db.list_messages(session_id)
+            history = self.db.list_messages(session_id, actor.id)
             messages = self.generator._build_qa_messages(question, chunks, history)
             try:
                 answer, attempts, check_reason = self.agent.answer(question, chunks, history)
@@ -477,8 +494,8 @@ class KnowledgeBaseService:
         if not output_guard.ok:
             answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
 
-        self.db.add_message(session_id, "user", question)
-        self.db.add_message(session_id, "assistant", answer)
+        self.db.add_message(session_id, "user", question, actor.id)
+        self.db.add_message(session_id, "assistant", answer, actor.id)
         self._cache_qa(cache_key, answer, sources)
         return QueryResult(
             answer=answer,
@@ -506,7 +523,7 @@ class KnowledgeBaseService:
             return
 
         question = self._sanitize(question)
-        cache_key = self._qa_cache_key(kb_id, question)
+        cache_key = self._qa_cache_key(kb_id, question, actor.id)
         cached = self._cached_qa(cache_key)
         if cached is not None:
             yield {"type": "sources", "sources": cached["sources"]}
@@ -524,7 +541,7 @@ class KnowledgeBaseService:
 
         answer_parts: list[str] = []
         if self.generator.available:
-            history = self.db.list_messages(session_id)
+            history = self.db.list_messages(session_id, actor.id)
             messages = self.generator._build_qa_messages(question, chunks, history)
             try:
                 async for token in self.generator.stream(messages):
@@ -549,8 +566,8 @@ class KnowledgeBaseService:
             answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
             yield {"type": "token", "content": answer}
 
-        self.db.add_message(session_id, "user", question)
-        self.db.add_message(session_id, "assistant", answer)
+        self.db.add_message(session_id, "user", question, actor.id)
+        self.db.add_message(session_id, "assistant", answer, actor.id)
         self._cache_qa(cache_key, answer, sources)
         yield {"type": "done", "rewritten_query": rewritten}
 
@@ -559,8 +576,8 @@ class KnowledgeBaseService:
         record_feedback(self.db, session_id, question, answer, rating, kb_id=kb_id, document_ids=document_ids)
     # 缓存
 
-    def _qa_cache_key(self, kb_id: str, question: str) -> str:
-        digest = hashlib.sha256(f"{kb_id}:{question}".encode("utf-8")).hexdigest()
+    def _qa_cache_key(self, kb_id: str, question: str, user_id: str) -> str:
+        digest = hashlib.sha256(f"{kb_id}:{user_id}:{question}".encode("utf-8")).hexdigest()
         return f"qa:{digest}"
 
     def _cached_qa(self, key: str) -> dict[str, Any] | None:
@@ -641,4 +658,7 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+
+
+
 
