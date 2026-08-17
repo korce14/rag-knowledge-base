@@ -672,6 +672,14 @@ function setupEvents() {
   $("#createUserButton").addEventListener("click", createUser);
   $("#closeDocumentViewer").addEventListener("click", closeDocumentViewer);
   $("#askDocumentButton").addEventListener("click", askDocument);
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("#settingsButton")) openAuth();
+  });
+
+  document.addEventListener("submit", (event) => {
+    if (event.target.id === "settingsForm" && !event.defaultPrevented) login(event);
+  });
 }
 
 async function init() {
