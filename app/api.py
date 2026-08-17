@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import asyncio
 import re
 from pathlib import Path
 from typing import Annotated
@@ -46,7 +47,7 @@ class ShareDocumentRequest(BaseModel):
 
 
 service = KnowledgeBaseService()
-app = FastAPI(title="RAG 知识库", version="2.0.0")
+app = FastAPI(title="RAG 知识库", version="2.0.0", docs_url="/docs" if settings.docs_enabled else None, redoc_url="/redoc" if settings.docs_enabled else None, openapi_url="/openapi.json" if settings.docs_enabled else None)
 app.state.service = service
 app.add_middleware(
     CORSMiddleware,
@@ -60,7 +61,7 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", **service.capabilities()}
+    return {"status": "ok", **service.health()}
 
 
 @app.post("/api/auth/login")
@@ -192,7 +193,7 @@ async def upload_document(
     destination.write_bytes(content)
 
     try:
-        result = service.ingest_path_with_mode(
+        result = await asyncio.to_thread(service.ingest_path_with_mode,
             principal.user,
             kb_id,
             destination,
@@ -360,6 +361,9 @@ def _short_id() -> str:
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
+
+
 
 
 

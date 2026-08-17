@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     login_rate_limit_per_minute: int = 10
     api_rate_limit_per_minute: int = 120
     audit_enabled: bool = True
+    docs_enabled: bool = True
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     token_expire_minutes: int = 720

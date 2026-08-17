@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 import time
 from typing import Any
 
@@ -13,6 +14,11 @@ class StructuredLogger:
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter("%(message)s"))
             self.logger.addHandler(handler)
+            log_dir = Path(__file__).resolve().parent.parent / "data" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.FileHandler(log_dir / "rag.log", encoding="utf-8")
+            file_handler.setFormatter(logging.Formatter("%(message)s"))
+            self.logger.addHandler(file_handler)
         self.logger.setLevel(logging.INFO)
 
     def event(self, event: str, **data: Any) -> None:

@@ -611,6 +611,23 @@ class KnowledgeBaseService:
             "generation_model": settings.generation_model,
         }
 
+    def health(self) -> dict[str, Any]:
+        result = self.capabilities()
+        result["redis_ok"] = True
+        if self.resilience.cache.enabled:
+            try:
+                self.resilience.cache.set("health:check", "1", 5)
+                result["redis_ok"] = self.resilience.cache.get("health:check") == "1"
+            except Exception:
+                result["redis_ok"] = False
+        result["qdrant_ok"] = True
+        if self.vector_store.enabled:
+            try:
+                self.vector_store._get_client().get_collections()
+            except Exception:
+                result["qdrant_ok"] = False
+        return result
+
     def prompt_versions(self) -> dict[str, Any]:
         return self.guard.prompt_version()
 

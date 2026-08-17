@@ -129,11 +129,13 @@ class QdrantVectorStore:
         query_vector: np.ndarray,
         top_k: int = 10,
         allowed_ids: set[str] | None = None,
+        document_ids: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         if not self.enabled:
             return []
         try:
             client = self._get_client()
+            from qdrant_client import models
             name = _collection_name(kb_id)
             if not client.collection_exists(name):
                 return []
@@ -142,9 +144,15 @@ class QdrantVectorStore:
             if allowed_ids is not None:
                 search_limit = max(search_limit * 4, 20)
 
+            query_filter = None
+            if document_ids is not None:
+                query_filter = models.Filter(
+                    must=[models.FieldCondition(key="document_id", match=models.MatchAny(any=list(document_ids)))]
+                )
             result = client.query_points(
                 collection_name=name,
                 query=np.asarray(query_vector, dtype=np.float32).reshape(1, -1).tolist()[0],
+                query_filter=query_filter,
                 limit=search_limit,
                 with_payload=True,
             ).points
@@ -170,5 +178,6 @@ class QdrantVectorStore:
 
 
 VectorStore = QdrantVectorStore
+
 
 

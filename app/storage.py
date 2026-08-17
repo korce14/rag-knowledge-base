@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,20 +23,23 @@ class Database:
 
     def __init__(self, path: Path | None = None):
         self.path = Path(path or settings.data_dir / "knowledge.db")
+        self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        with self._lock:
+            conn = sqlite3.connect(self.path, timeout=30)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=30000")
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         with self.connection() as conn:
@@ -575,4 +579,5 @@ def _new_id(prefix: str) -> str:
     import uuid
 
     return f"{prefix}_{uuid.uuid4().hex}"
+
 

@@ -54,6 +54,8 @@ class Guard:
         lower = answer.lower()
         if any(re.search(pattern, lower) for pattern in self.blocked_patterns):
             return GuardResult(False, "生成结果被安全策略拦截。")
+        if any(re.search(pattern, answer) for pattern in self.pii_patterns):
+            return GuardResult(False, "生成结果包含敏感信息，已被安全策略拦截。")
         return GuardResult(True)
 
     def validate_upload(

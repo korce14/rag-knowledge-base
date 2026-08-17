@@ -34,12 +34,14 @@ class Retriever:
         if self.embedder.available and allowed_chunks:
             try:
                 query_vector = self.embedder.embed_query(query)
+                allowed_doc_ids = {chunk.document_id for chunk in allowed_chunks}
                 dense_hits = dict(
                     self.vector_store.search(
                         self.kb_id,
                         query_vector,
                         top_k=max(top_k * 3, 10),
                         allowed_ids=set(allowed_ids),
+                        document_ids=allowed_doc_ids,
                     )
                 )
             except Exception:
