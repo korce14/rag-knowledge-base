@@ -386,8 +386,8 @@ function addMessage(role, text, messageId = null) {
   $("#emptyState").classList.add("hidden");
   const row = document.createElement("div");
   row.className = "message-row";
-  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${escapeHtml(text) || ""}</div><div class="message-actions"><button class="icon-button small message-copy" aria-label="复制">⧉</button>${messageId ? `<button class="icon-button small danger message-delete" data-message-id="${messageId}" aria-label="删除">×</button>` : ""}</div></div>`;
-  $("#chat").appendChild(row);
+  const renderedText = role === "assistant" ? renderMarkdown(text || "") : escapeHtml(text || "");
+  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${renderedText}</div><div class="message-actions"><button class="icon-button small message-copy" aria-label="复制">⧉</button>${messageId ? `<button class="icon-button small danger message-delete" data-message-id="${messageId}" aria-label="删除">×</button>` : ""}</div></div>`;
   $("#chat").scrollTop = $("#chat").scrollHeight;
   row.querySelector(".message-copy").addEventListener("click", async (event) => {
     event.stopPropagation();
