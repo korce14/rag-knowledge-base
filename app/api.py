@@ -1,14 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
-import asyncio
 import re
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -59,6 +58,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path in {"/", "/index.html", "/app.js", "/styles.css"}:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
 
 
 @app.get("/health")
@@ -205,28 +213,34 @@ async def upload_document(
     destination.write_bytes(content)
 
     try:
-        result = await asyncio.to_thread(service.ingest_path_with_mode,
+        result = service.submit_ingestion(
             principal.user,
             kb_id,
             destination,
             tags.split(",") if tags else None,
             access_mode,
         )
-    except FileExistsError as exc:
-        destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HTTPException:
         destination.unlink(missing_ok=True)
         raise
     except Exception as exc:
         destination.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=f"文档解析失败：{exc}") from exc
+        raise HTTPException(status_code=400, detail=f"文档提交失败：{exc}") from exc
     return result
 
 
 @app.get("/api/knowledge_bases/{kb_id}/documents")
 async def list_documents(kb_id: str, principal: CurrentUser) -> list[dict]:
     return service.list_visible_documents(principal.user, kb_id)
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_upload_task(task_id: str, principal: CurrentUser) -> dict:
+    task = service.get_upload_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task
+
 @app.delete("/api/documents/{document_id}")
 async def remove_document(document_id: str, principal: CurrentUser) -> dict:
     record = service.db.get_document(document_id)
@@ -319,7 +333,7 @@ async def route(payload: dict, principal: CurrentUser) -> dict:
 
 @app.post("/api/agent")
 async def agent(payload: dict, principal: CurrentUser) -> dict:
-    return service.run_agent_tool(str(payload.get("tool", "")), payload.get("args", {}) or {})
+    return service.run_agent_tool(str(payload.get("tool", "")), payload.get("args", {}) or {}, actor=principal.user)
 @app.post("/api/chat")
 async def chat(payload: dict, principal: CurrentUser) -> dict:
     kb_id = str(payload.get("kb_id", "")).strip()
@@ -431,6 +445,131 @@ async def feedback(payload: dict, principal: CurrentUser) -> dict:
     )
     return {"ok": True}
 
+
+@app.post("/api/auth/change-password")
+async def change_password(payload: dict, principal: CurrentUser) -> dict:
+    service.change_password(principal.user, str(payload.get("old_password", "")), str(payload.get("new_password", "")))
+    return {"ok": True}
+
+
+@app.post("/api/users/{user_id}/reset-password")
+async def reset_password(user_id: str, payload: dict, principal: CurrentUser) -> dict:
+    service.reset_password(principal.user, user_id, str(payload.get("password", "")))
+    return {"ok": True}
+
+
+@app.post("/api/api-keys")
+async def create_api_key(payload: dict, principal: CurrentUser) -> dict:
+    return service.create_api_key(principal.user, str(payload.get("name", "default")))
+
+
+@app.get("/api/api-keys")
+async def list_api_keys(principal: CurrentUser) -> list[dict]:
+    return service.list_api_keys(principal.user)
+
+
+@app.delete("/api/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, principal: CurrentUser) -> dict:
+    service.revoke_api_key(principal.user, key_id)
+    return {"ok": True}
+
+
+@app.post("/api/knowledge_bases/{kb_id}/batch-import")
+async def batch_import(kb_id: str, principal: CurrentUser, file: Annotated[UploadFile, File()], tags: Annotated[str, Form()] = "", mode: Annotated[str, Form()] = "document") -> dict:
+    content = await file.read()
+    if len(content) > settings.guard_upload_max_bytes:
+        raise HTTPException(status_code=413, detail="文件大小超过安全限制")
+    upload_dir = settings.data_dir / "batch-uploads" / kb_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    destination = upload_dir / Path(file.filename or "batch.csv").name
+    destination.write_bytes(content)
+    return service.submit_ingestion(principal.user, kb_id, destination, tags.split(",") if tags else None, "public", kind="batch", extra={"mode": mode})
+
+
+@app.post("/api/knowledge_bases/{kb_id}/folder-index")
+async def folder_index(kb_id: str, payload: dict, principal: CurrentUser) -> dict:
+    folder = str(payload.get("folder_path", "")).strip()
+    if not folder:
+        raise HTTPException(status_code=422, detail="folder_path 不能为空")
+    path = Path(folder)
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail="文件夹不存在或不是目录")
+    return service.submit_ingestion(principal.user, kb_id, path, None, "public", kind="folder")
+
+
+@app.get("/api/knowledge_bases/{kb_id}/sources")
+async def list_sources(kb_id: str, principal: CurrentUser) -> list[dict]:
+    return service.list_sources(principal.user, kb_id)
+
+
+@app.post("/api/knowledge_bases/{kb_id}/sources")
+async def create_source(kb_id: str, payload: dict, principal: CurrentUser) -> dict:
+    return service.create_source(
+        principal.user,
+        kb_id,
+        str(payload.get("kind", "")),
+        str(payload.get("name", "数据源")),
+        payload.get("config") or {},
+        int(payload.get("interval_minutes", 60)),
+    )
+
+
+@app.patch("/api/sources/{source_id}")
+async def update_source(source_id: str, payload: dict, principal: CurrentUser) -> dict:
+    service.update_source(principal.user, source_id, **payload)
+    return {"ok": True}
+
+
+@app.delete("/api/sources/{source_id}")
+async def delete_source(source_id: str, principal: CurrentUser) -> dict:
+    service.delete_source(principal.user, source_id)
+    return {"ok": True}
+
+
+@app.post("/api/sources/{source_id}/sync")
+async def sync_source(source_id: str, principal: CurrentUser) -> dict:
+    return service.sync_source_now(principal.user, source_id)
+
+
+@app.get("/api/analytics/questions")
+async def analytics_questions(kb_id: str, principal: CurrentUser) -> list[dict]:
+    return service.analytics_questions(principal.user, kb_id)
+
+
+@app.get("/api/analytics/report")
+async def analytics_report(kb_id: str, principal: CurrentUser) -> dict:
+    return service.analytics_report(principal.user, kb_id)
+
+
+@app.get("/api/analytics/report.csv")
+async def export_analytics_report(kb_id: str, principal: CurrentUser) -> PlainTextResponse:
+    return PlainTextResponse(service.export_analytics_report(principal.user, kb_id), media_type="text/csv; charset=utf-8")
+
+
+@app.post("/api/knowledge_bases/{kb_id}/toc")
+async def generate_kb_toc(kb_id: str, principal: CurrentUser) -> dict:
+    return service.generate_kb_toc(principal.user, kb_id)
+
+
+@app.get("/api/knowledge_bases/{kb_id}/toc")
+async def get_kb_toc(kb_id: str, principal: CurrentUser) -> dict:
+    return service.get_kb_toc(principal.user, kb_id)
+
+
+@app.get("/api/analytics/cards")
+async def analytics_cards(kb_id: str, principal: CurrentUser) -> list[dict]:
+    return service.analytics_cards(principal.user, kb_id)
+
+
+@app.get("/api/analytics/cards/{card_id}/export")
+async def export_analytics_card(card_id: str, kb_id: str, principal: CurrentUser) -> PlainTextResponse:
+    return PlainTextResponse(service.export_analytics_card(principal.user, kb_id, card_id), media_type="text/html; charset=utf-8")
+
+
+@app.post("/api/knowledge_bases/{kb_id}/overview")
+async def generate_kb_overview(kb_id: str, principal: CurrentUser) -> dict:
+    return service.generate_kb_overview(principal.user, kb_id)
+
 def _short_id() -> str:
     import uuid
 
@@ -438,6 +577,7 @@ def _short_id() -> str:
 
 
 static_dir = Path(__file__).resolve().parent / "static"
+app.mount("/admin", StaticFiles(directory=static_dir / "admin", html=True), name="admin")
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 

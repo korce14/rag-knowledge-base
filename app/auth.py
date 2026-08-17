@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Annotated
@@ -7,7 +7,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from .config import settings
 from .models import Role, User
-from .security import decode_access_token
+from .security import decode_access_token, hash_api_key
 
 
 @dataclass
@@ -37,7 +37,18 @@ def _service_token_user() -> User:
 async def get_current_user(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
+    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ) -> AuthPrincipal:
+    if x_api_key:
+        db = request.app.state.service.db
+        record = db.get_api_key_by_hash(hash_api_key(x_api_key))
+        if record:
+            user = db.get_user(record["user_id"])
+            if user and user.is_active:
+                db.touch_api_key(record["id"])
+                return AuthPrincipal(user=user, token_type="api_key")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API Key 无效或已被回收")
+
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

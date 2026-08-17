@@ -46,3 +46,7 @@ def create_access_token(username: str, role: str, user_id: str) -> str:
 
 def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+
+
+def hash_api_key(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()

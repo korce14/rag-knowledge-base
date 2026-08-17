@@ -5,12 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+COPY pyproject.toml README.md ./
 COPY app ./app
 COPY prompts ./prompts
 COPY scripts ./scripts
+
+RUN pip install --no-cache-dir .
 
 EXPOSE 8000
 

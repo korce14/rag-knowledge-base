@@ -55,14 +55,15 @@ def plot_chart(kind: str, x: list[float], y: list[float], title: str = "chart") 
     return str(path)
 
 
-def retrieve(kb_id: str, query: str, top_k: int = 5, service=None) -> list[dict[str, Any]]:
+def retrieve(kb_id: str, query: str, top_k: int = 5, service=None, actor=None, document_id: str | None = None) -> list[dict[str, Any]]:
     from .pipeline import KnowledgeBaseService
 
     service = service or KnowledgeBaseService()
-    admin = service.db.get_user_by_username(settings.admin_username) or service.db.get_user_by_username("korce")
-    if admin is None:
+    if actor is None:
+        actor = service.db.get_user_by_username(settings.admin_username) or service.db.get_user_by_username("korce")
+    if actor is None:
         return []
-    hits = service.search_visible(admin, kb_id, query, top_k=top_k)
+    hits = service.search_visible(actor, kb_id, query, top_k=top_k, document_id=document_id)
     return [
         {
             "document_name": hit.chunk.document_name,
@@ -71,4 +72,3 @@ def retrieve(kb_id: str, query: str, top_k: int = 5, service=None) -> list[dict[
         }
         for hit in hits
     ]
-

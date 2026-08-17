@@ -143,11 +143,14 @@ class QdrantVectorStore:
 
             search_limit = max(top_k, 1)
             if allowed_ids is not None:
-                search_limit = max(search_limit * 4, 20)
+                if not allowed_ids:
+                    return []
 
             conditions = []
             if document_ids is not None:
                 conditions.append(models.FieldCondition(key="document_id", match=models.MatchAny(any=list(document_ids))))
+            if allowed_ids is not None:
+                conditions.append(models.FieldCondition(key="chunk_id", match=models.MatchAny(any=list(allowed_ids))))
             if tags:
                 conditions.append(models.FieldCondition(key="tags", match=models.MatchAny(any=tags)))
             query_filter = models.Filter(must=conditions) if conditions else None
@@ -161,9 +164,7 @@ class QdrantVectorStore:
 
             hits: list[tuple[str, float]] = []
             for point in result:
-                chunk_id = str(point.payload.get("chunk_id", point.id))
-                if allowed_ids is not None and chunk_id not in allowed_ids:
-                    continue
+                chunk_id = str(point.payload.get("chunk_id") or getattr(point, "id", ""))
                 hits.append((chunk_id, float(point.score)))
                 if len(hits) >= top_k:
                     break

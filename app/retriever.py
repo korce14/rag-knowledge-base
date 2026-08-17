@@ -7,18 +7,29 @@ from .embedder import Embedder
 from .models import Chunk, ScoredChunk
 from .text import BM25
 from .vector_store import VectorStore
+from typing import Any
+
+from .text import tokenize
 
 
 class Retriever:
-    def __init__(self, chunks: list[Chunk], kb_id: str, vector_store: VectorStore, embedder: Embedder):
+    def __init__(self, chunks: list[Chunk], kb_id: str, vector_store: VectorStore, embedder: Embedder, persisted_tokens: dict[str, dict[str, Any]] | None = None):
         self.chunks = chunks
         self.kb_id = kb_id
         self.vector_store = vector_store
         self.embedder = embedder
         self._chunk_by_id = {chunk.id: chunk for chunk in chunks}
         self.bm25 = BM25()
-        if chunks:
+        if persisted_tokens:
+            ordered = []
+            for chunk in chunks:
+                entry = persisted_tokens.get(chunk.id)
+                ordered.append(entry["tokens"] if entry else tokenize(chunk.text))
+            if ordered:
+                self.bm25.fit_token_lists(ordered)
+        if not self.bm25.corpus and chunks:
             self.bm25.fit([chunk.text for chunk in chunks])
+
 
     def search(
         self,

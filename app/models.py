@@ -63,6 +63,8 @@ class KnowledgeBase:
     name: str
     description: str = ""
     created_at: str = ""
+    toc_json: str = "{}"
+    overview: str = ""
 
 
 @dataclass

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
@@ -6,6 +6,11 @@ import re
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator
+import asyncio
+import queue as queue_module
+import threading
+import secrets
+import uuid
 
 from fastapi import HTTPException, status
 
@@ -29,6 +34,7 @@ from .resilience import Resilience
 from .retriever import Retriever
 from .security import hash_password
 from .storage import Database
+from .text import tokenize
 from .vector_store import QdrantVectorStore
 
 _ROLE_LEVEL = {
@@ -36,6 +42,62 @@ _ROLE_LEVEL = {
     Role.EDITOR: 2,
     Role.ADMIN: 3,
 }
+
+
+_AGENT_TOOLS = {"calculate", "sql_query", "plot_chart", "retrieve"}
+_TOOL_STRONG_PATTERNS = [
+    "帮我计算", "请计算", "帮我算", "请算", "算一下", "求值",
+    "帮我画", "请画", "画一个", "画图", "绘图", "图表", "柱状图", "折线图", "饼图", "散点图",
+    "sql", "select", "查询数据库", "查询表", "检索一下", "帮我查", "检索", 
+]
+_DOC_CONTENT_WORDS = ["文档", "知识库", "资料", "内容", "讲", "总结", "有什么", "介绍"]
+
+
+def _looks_like_tool_request(question: str) -> bool:
+    lowered = question.lower()
+    has_expression = bool(re.search(r"[0-9]|[+\-*/=()%]", question))
+    if any(word in lowered for word in _DOC_CONTENT_WORDS) and not has_expression:
+        return False
+    return any(word in lowered for word in _TOOL_STRONG_PATTERNS)
+
+
+def _choose_tool_heuristic(question: str) -> str:
+    lowered = question.lower()
+    if re.search(r"select\s", lowered, flags=re.IGNORECASE) or any(word in lowered for word in ["查询数据库", "查询表", "统计文档"]):
+        return "sql_query"
+    if any(word in lowered for word in ["柱状图", "折线图", "饼图", "散点图", "图表", "画图", "绘图", "画一个", "帮我画", "请画"]):
+        return "plot_chart"
+    if any(word in lowered for word in ["计算", "等于", "求值"]) and re.search(r"[0-9]|[+\-*/=()%]", question):
+        return "calculate"
+    return "retrieve"
+
+
+def _extract_expression(question: str) -> str:
+    match = re.search(r"([-+]?\(?[0-9][0-9\s]*(?:[+\-*/()][0-9\s()]+)+\)?)", question)
+    return match.group(1).replace(" ", "") if match else ""
+
+
+def _guess_chart_kind(question: str) -> str:
+    lowered = question.lower()
+    if "饼图" in lowered or "占比" in lowered:
+        return "pie"
+    if "散点" in lowered or "分布" in lowered:
+        return "scatter"
+    if "折线" in lowered or "趋势" in lowered or "变化" in lowered:
+        return "line"
+    return "bar"
+
+
+def _to_number_list(value: Any, default: list[float]) -> list[float]:
+    if not isinstance(value, list):
+        return default
+    numbers: list[float] = []
+    for item in value[:100]:
+        try:
+            numbers.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return numbers or default
 
 
 class KnowledgeBaseService:
@@ -57,6 +119,14 @@ class KnowledgeBaseService:
         self.pipeline_scheduler = self._build_pipeline_scheduler()
         self._retriever_cache: dict[tuple[str, ...], Retriever] = {}
         self._ensure_admin_user()
+
+        self._upload_queue: "queue_module.Queue[str]" = queue_module.Queue()
+        self._upload_tasks: dict[str, dict[str, Any]] = {}
+        self._upload_lock = threading.Lock()
+        self._upload_worker = threading.Thread(target=self._upload_worker_loop, daemon=True, name="rag-upload-worker")
+        self._upload_worker.start()
+        self._source_scheduler = threading.Thread(target=self._source_scheduler_loop, daemon=True, name="rag-source-scheduler")
+        self._source_scheduler.start()
 
     # 初始化与用户
 
@@ -111,6 +181,19 @@ class KnowledgeBaseService:
         question = self._sanitize(question)
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         self.ensure_session(actor, session_id)
+        agent_cache_key = self._agent_cache_key(kb_id, question, actor.id)
+        cached_agent = self._cached_qa(agent_cache_key)
+        if cached_agent is not None:
+            return {
+                "answer": cached_agent["answer"],
+                "sources": cached_agent["sources"],
+                "route": "agent",
+                "cached": True,
+                "elapsed_ms": 0,
+                "rewritten_query": question,
+            }
+        if self.route_query(question) == "agent":
+            return self._run_agent_pipeline(actor, kb_id, question, session_id, document_id)
         context = PipelineContext(
             actor=actor,
             kb_id=kb_id,
@@ -272,6 +355,7 @@ class KnowledgeBaseService:
         self._require_document_access(actor, record, Role.EDITOR)
         self.db.add_audit_log(actor.id, "delete", "document", document_id, record.name)
         delete_document(self.db, self.vector_store, record.kb_id, document_id)
+        self.db.delete_bm25_tokens(kb_id=record.kb_id, document_id=document_id)
         self._invalidate_retriever_cache(record.kb_id)
         self.resilience.cache.clear()
 
@@ -281,6 +365,8 @@ class KnowledgeBaseService:
         if not guard_result.ok:
             raise HTTPException(status_code=400, detail=guard_result.reason)
         record, chunks = ingest_file_with_mode(self.db, kb_id, file_path, tags, access_mode)
+        if chunks:
+            self.db.save_bm25_tokens(kb_id, {chunk.id: (record.id, chunk.text, tokenize(chunk.text)) for chunk in chunks})
         self.db.add_audit_log(actor.id, "upload", "document", record.id, record.name)
         if access_mode == "restricted" and actor.role != Role.ADMIN:
             self.db.grant_document_permission(actor.id, record.id, Role.EDITOR)
@@ -307,6 +393,83 @@ class KnowledgeBaseService:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self.db.list_documents(kb_id)]
 
+    def submit_ingestion(self, actor: User, kb_id: str, file_path: Path, tags: list[str] | None = None, access_mode: str = "public", kind: str = "document", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        task_id = f"task_{uuid.uuid4().hex[:12]}"
+        with self._upload_lock:
+            self._upload_tasks[task_id] = {
+                "task_id": task_id,
+                "status": "pending",
+                "actor": actor,
+                "kb_id": kb_id,
+                "file_path": str(file_path),
+                "tags": tags,
+                "access_mode": access_mode,
+                "kind": kind,
+                "extra": extra,
+                "result": None,
+                "error": None,
+                "code": None,
+            }
+            if len(self._upload_tasks) > 100:
+                oldest = next(iter(self._upload_tasks))
+                self._upload_tasks.pop(oldest, None)
+        self._upload_queue.put(task_id)
+        return {"task_id": task_id, "status": "pending"}
+
+    def get_upload_task(self, task_id: str) -> dict[str, Any] | None:
+        with self._upload_lock:
+            task = self._upload_tasks.get(task_id)
+            if task is None:
+                return None
+            return {
+                "task_id": task["task_id"],
+                "status": task["status"],
+                "result": task["result"],
+                "error": task["error"],
+                "code": task["code"],
+            }
+
+    def _upload_worker_loop(self) -> None:
+        while True:
+            task_id = self._upload_queue.get()
+            with self._upload_lock:
+                task = self._upload_tasks.get(task_id)
+            if task is None:
+                continue
+            try:
+                with self._upload_lock:
+                    task["status"] = "running"
+                kind = task.get("kind", "document")
+                if kind == "batch":
+                    from .batch_import import import_tabular
+                    result = import_tabular(self, task["actor"], task["kb_id"], Path(task["file_path"]), task["tags"], (task.get("extra") or {}).get("mode", "document"))
+                elif kind == "folder":
+                    from .batch_import import index_folder
+                    result = index_folder(self, task["actor"], task["kb_id"], Path(task["file_path"]), task["tags"])
+                else:
+                    result = self.ingest_path_with_mode(
+                        task["actor"],
+                        task["kb_id"],
+                        Path(task["file_path"]),
+                        task["tags"],
+                        task["access_mode"],
+                    )
+                with self._upload_lock:
+                    task["status"] = "done"
+                    task["result"] = result
+            except FileExistsError as exc:
+                with self._upload_lock:
+                    task["status"] = "error"
+                    task["error"] = str(exc)
+                    task["code"] = 409
+                Path(task["file_path"]).unlink(missing_ok=True)
+            except Exception as exc:
+                with self._upload_lock:
+                    task["status"] = "error"
+                    task["error"] = f"文档解析失败：{exc}"
+                    task["code"] = 400
+                Path(task["file_path"]).unlink(missing_ok=True)
+
     def list_visible_documents(self, actor: User, kb_id: str) -> list[Any]:
         self._require_kb_access(actor, kb_id, Role.VIEWER)
         return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
@@ -318,7 +481,6 @@ class KnowledgeBaseService:
         self._require_document_access(actor, record, Role.VIEWER)
         text = extract_text(Path(record.file_path))
         return {"id": record.id, "name": record.name, "text": text}
-        return [record.__dict__ for record in self._visible_documents(actor, kb_id)]
 
     def get_document_permissions(self, actor: User, document_id: str) -> list[dict[str, Any]]:
         document = self.db.get_document(document_id)
@@ -395,7 +557,8 @@ class KnowledgeBaseService:
 
     def get_retriever(self, kb_id: str) -> Retriever:
         chunks = self.db.list_chunks(kb_id)
-        return Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
+        persisted = self.db.get_bm25_tokens(kb_id)
+        return Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder, persisted_tokens=persisted)
 
     def _invalidate_retriever_cache(self, kb_id: str | None = None) -> None:
         if kb_id is None:
@@ -410,7 +573,8 @@ class KnowledgeBaseService:
         if key in self._retriever_cache:
             return self._retriever_cache[key]
         chunks = self.db.list_chunks_by_documents(kb_id, document_ids)
-        retriever = Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
+        persisted = self.db.get_bm25_tokens(kb_id, [chunk.id for chunk in chunks])
+        retriever = Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder, persisted_tokens=persisted)
         self._retriever_cache[key] = retriever
         return retriever
 
@@ -540,6 +704,19 @@ class KnowledgeBaseService:
             yield {"type": "done", "rewritten_query": question}
             return
 
+        agent_cache_key = self._agent_cache_key(kb_id, question, actor.id)
+        cached_agent = self._cached_qa(agent_cache_key)
+        if cached_agent is not None:
+            yield {"type": "sources", "sources": cached_agent["sources"]}
+            yield {"type": "token", "content": cached_agent["answer"]}
+            yield {"type": "done", "rewritten_query": question}
+            return
+        route = await asyncio.to_thread(self.route_query, question)
+        if route == "agent":
+            async for event in self._stream_agent(actor, kb_id, question, session_id, document_id):
+                yield event
+            return
+
         rewritten = self.generator.rewrite_query(question)
         yield {"type": "progress", "stage": "retrieval", "message": "检索知识库中..."}
         hits = self.search_visible(actor, kb_id, rewritten, top_k=top_k, document_id=document_id, tags=tags)
@@ -613,7 +790,6 @@ class KnowledgeBaseService:
         return self.db.list_sessions(actor.id)
 
     def create_session(self, actor: User, session_id: str | None = None, title: str = "新会话") -> dict[str, Any]:
-        import uuid
         session_id = session_id or f"session_{uuid.uuid4().hex[:12]}"
         self.db.create_session(session_id, actor.id, title)
         return {"id": session_id, "title": title}
@@ -704,6 +880,7 @@ class KnowledgeBaseService:
 
     def list_retrieval_gaps(self, actor: User, kb_id: str | None = None) -> list[dict[str, Any]]:
         self._require_global_role(actor, Role.ADMIN)
+        return self.db.list_retrieval_gaps(kb_id)
 
     def retrieval_gap_summary(self, actor: User) -> dict[str, Any]:
         self._require_global_role(actor, Role.ADMIN)
@@ -713,22 +890,525 @@ class KnowledgeBaseService:
             grouped[gap["question"]] = grouped.get(gap["question"], 0) + 1
         top = sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:10]
         return {"total": len(gaps), "unresolved": sum(1 for item in gaps if not item["resolved"]), "top": [{"question": q, "count": c} for q, c in top]}
-        return self.db.list_retrieval_gaps(kb_id)
 
     def prompt_versions(self) -> dict[str, Any]:
         return self.guard.prompt_version()
 
     def route_query(self, question: str) -> str:
-        lowered = question.lower()
-        if any(word in lowered for word in ["计算", "画图", "绘图", "sql", "查询数据"]):
-            return "agent"
-        return "rag"
+        if self.generator.available:
+            try:
+                rendered = self.prompts.render("router", {"question": question})
+                text = self.generator.generate(
+                    [
+                        {"role": "system", "content": rendered["system"]},
+                        {"role": "user", "content": rendered["user"]},
+                    ],
+                    temperature=0.0,
+                ).strip().lower()
+                if "agent" in text:
+                    if _looks_like_tool_request(question):
+                        return "agent"
+                if "rag" in text:
+                    return "rag"
+            except Exception:
+                pass
+        return "agent" if _looks_like_tool_request(question) else "rag"
 
-    def run_agent_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+
+    def run_agent_tool(self, name: str, args: dict[str, Any], actor: User | None = None) -> dict[str, Any]:
         from .agent_runner import run_tool
-        return run_tool(name, args, service=self)
+        return run_tool(name, args, service=self, actor=actor)
+
+    # 企业功能
+
+    def create_api_key(self, actor: User, name: str) -> dict[str, Any]:
+        self._require_global_role(actor, Role.ADMIN)
+        from .security import hash_api_key
+        raw = "rag_" + secrets.token_urlsafe(24)
+        record = self.db.create_api_key(name.strip() or "default", actor.id, hash_api_key(raw))
+        return {"id": record["id"], "name": record["name"], "key": raw}
+
+    def list_api_keys(self, actor: User) -> list[dict[str, Any]]:
+        return self.db.list_api_keys(actor.id)
+
+    def revoke_api_key(self, actor: User, key_id: str) -> None:
+        self.db.revoke_api_key(key_id, actor.id)
+
+    def change_password(self, actor: User, old_password: str, new_password: str) -> None:
+        from .security import hash_password, verify_password
+        if len(new_password) < 8:
+            raise HTTPException(status_code=422, detail="新密码至少需要 8 个字符")
+        if not verify_password(old_password, actor.password_hash):
+            raise HTTPException(status_code=400, detail="原密码不正确")
+        self.db.update_user(actor.id, password_hash=hash_password(new_password))
+
+    def reset_password(self, actor: User, user_id: str, new_password: str) -> None:
+        self._require_global_role(actor, Role.ADMIN)
+        if len(new_password) < 8:
+            raise HTTPException(status_code=422, detail="新密码至少需要 8 个字符")
+        self.db.update_user(user_id, password_hash=hash_password(new_password))
+
+    def create_source(self, actor: User, kb_id: str, kind: str, name: str, config: dict[str, Any], interval_minutes: int = 60) -> dict[str, Any]:
+        self._require_kb_access(actor, kb_id, Role.EDITOR)
+        if kind not in {"rss", "db", "api"}:
+            raise HTTPException(status_code=422, detail="数据源类型只能是 rss/db/api")
+        return self.db.create_source(kb_id, kind, name, config, interval_minutes)
+
+    def list_sources(self, actor: User, kb_id: str) -> list[dict[str, Any]]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        return self.db.list_sources(kb_id)
+
+    def update_source(self, actor: User, source_id: str, **fields: Any) -> None:
+        source = next((item for item in self.db.list_sources() if item.get("id") == source_id), None)
+        if not source:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        self._require_kb_access(actor, source["kb_id"], Role.EDITOR)
+        self.db.update_source(source_id, **fields)
+
+    def delete_source(self, actor: User, source_id: str) -> None:
+        source = next((item for item in self.db.list_sources() if item.get("id") == source_id), None)
+        if not source:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        self._require_kb_access(actor, source["kb_id"], Role.EDITOR)
+        self.db.delete_source(source_id)
+
+    def sync_source_now(self, actor: User, source_id: str) -> dict[str, Any]:
+        source = next((item for item in self.db.list_sources() if item.get("id") == source_id), None)
+        if not source:
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        self._require_kb_access(actor, source["kb_id"], Role.EDITOR)
+        from .sources import sync_source
+        result = sync_source(self, actor, source)
+        self.db.mark_source_synced(source_id)
+        return result
+
+    def _source_scheduler_loop(self) -> None:
+        from datetime import datetime, timezone
+        while True:
+            try:
+                for source in self.db.list_sources():
+                    if not source.get("enabled"):
+                        continue
+                    interval = max(int(source.get("interval_minutes") or 60), 1)
+                    last = source.get("last_synced_at")
+                    if last:
+                        try:
+                            last_at = datetime.fromisoformat(last)
+                            if (datetime.now(timezone.utc) - last_at).total_seconds() < interval * 60:
+                                continue
+                        except ValueError:
+                            pass
+                    try:
+                        from .sources import sync_source
+                        admin = self.db.get_user_by_username(settings.admin_username) or self.db.get_user_by_username("korce")
+                        if admin:
+                            sync_source(self, admin, source)
+                            self.db.mark_source_synced(source["id"])
+                    except Exception as exc:
+                        self.logger.event("source_sync_failed", source_id=source.get("id"), error=str(exc))
+            except Exception:
+                pass
+            time.sleep(60)
+
+    def generate_kb_toc(self, actor: User, kb_id: str) -> dict[str, Any]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        documents = self.db.list_documents(kb_id)
+        toc = [{"id": doc.id, "title": doc.name} for doc in documents]
+        overview = self._summarize_knowledge_base(documents)
+        if self.generator.available and documents:
+            try:
+                names = "\n".join(f"- {doc.name}" for doc in documents)
+                text = self.generator.generate(
+                    [
+                        {"role": "system", "content": "根据文档清单生成知识库目录。每行格式：- 标题；不要输出概述或其他文字。"},
+                        {"role": "user", "content": names},
+                    ],
+                    temperature=0.2,
+                )
+                parsed = [line.strip().lstrip("- ").strip() for line in text.splitlines() if line.strip() and not line.startswith("概述")]
+                if parsed:
+                    toc = [{"id": "", "title": title} for title in parsed]
+            except Exception:
+                pass
+        self.db.set_kb_toc(kb_id, toc, overview)
+        return {"toc": toc, "overview": overview}
+    def get_kb_toc(self, actor: User, kb_id: str) -> dict[str, Any]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        toc, overview = self.db.get_kb_toc(kb_id)
+        return {"toc": toc, "overview": overview}
+
+    def analytics_questions(self, actor: User, kb_id: str) -> list[dict[str, Any]]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        grouped: dict[str, dict[str, Any]] = {}
+        for gap in self.db.list_retrieval_gaps(kb_id):
+            question = gap["question"]
+            entry = grouped.setdefault(question, {"question": question, "count": 0, "unresolved": 0, "last_asked": ""})
+            entry["count"] += 1
+            entry["unresolved"] += 0 if gap["resolved"] else 1
+            entry["last_asked"] = max(entry["last_asked"], gap["created_at"])
+        return sorted(grouped.values(), key=lambda item: item["count"], reverse=True)
+
+    def analytics_report(self, actor: User, kb_id: str) -> dict[str, Any]:
+        questions = self.analytics_questions(actor, kb_id)
+        return {
+            "total_questions": sum(item["count"] for item in questions),
+            "unresolved": sum(item["unresolved"] for item in questions),
+            "top": questions[:10],
+        }
+
+    def export_analytics_report(self, actor: User, kb_id: str) -> str:
+        report = self.analytics_report(actor, kb_id)
+        lines = ["问题,次数,未解决,最后提问时间"]
+        for item in report["top"]:
+            lines.append(f"{item['question']},{item['count']},{item['unresolved']},{item['last_asked']}")
+        return "\n".join(lines)
+
+    def analytics_cards(self, actor: User, kb_id: str) -> list[dict[str, Any]]:
+        cards: list[dict[str, Any]] = []
+        for item in self.analytics_questions(actor, kb_id):
+            card_id = hashlib.sha256(item["question"].encode("utf-8")).hexdigest()[:12]
+            cards.append({
+                "id": card_id,
+                "question": item["question"],
+                "count": item["count"],
+                "unresolved": item["unresolved"],
+                "last_asked": item["last_asked"],
+                "summary": self._card_summary(item),
+            })
+        return cards
+
+    def _card_summary(self, item: dict[str, Any]) -> str:
+        fallback = f"该问题累计被提问 {item['count']} 次，其中 {item['unresolved']} 次未找到满意资料，建议补充相关文档。"
+        if not self.generator.available:
+            return fallback
+        try:
+            text = self.generator.generate(
+                [
+                    {"role": "system", "content": "根据问题统计信息生成一句 50 字以内的中文分析摘要，不要编造数据。"},
+                    {"role": "user", "content": f"问题：{item['question']}\n次数：{item['count']}\n未解决：{item['unresolved']}"},
+                ],
+                temperature=0.2,
+            ).strip()
+            return text or fallback
+        except Exception:
+            return fallback
+
+    def export_analytics_card(self, actor: User, kb_id: str, card_id: str) -> str:
+        card = next((item for item in self.analytics_cards(actor, kb_id) if item["id"] == card_id), None)
+        if not card:
+            raise HTTPException(status_code=404, detail="分析卡片不存在")
+        return (
+            "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+            "<title>分析卡片</title></head><body style=\"font-family:'Microsoft YaHei',sans-serif;background:#f5f7fa;margin:0;padding:24px;\">"
+            "<div style=\"max-width:520px;margin:0 auto;background:#fff;border:1px solid #e4e7ed;border-radius:8px;padding:24px;\">"
+            f"<h2 style=\"margin-top:0;\">问题分组分析</h2>"
+            f"<div style=\"color:#606266;font-size:15px;margin:8px 0;\">{card['question']}</div>"
+            f"<div style=\"display:flex;gap:24px;margin:16px 0;\">"
+            f"<div><div style=\"font-size:28px;font-weight:700;\">{card['count']}</div><div style=\"color:#909399;\">提问次数</div></div>"
+            f"<div><div style=\"font-size:28px;font-weight:700;color:#f56c6c;\">{card['unresolved']}</div><div style=\"color:#909399;\">未解决</div></div>"
+            f"</div><div style=\"color:#606266;line-height:1.7;\">{card['summary']}</div>"
+            f"<div style=\"color:#c0c4cc;font-size:12px;margin-top:16px;\">最后提问：{card['last_asked']}</div>"
+            "</div></body></html>"
+        )
+
+    def generate_kb_overview(self, actor: User, kb_id: str) -> dict[str, Any]:
+        self._require_kb_access(actor, kb_id, Role.VIEWER)
+        documents = self.db.list_documents(kb_id)
+        overview = self._summarize_knowledge_base(documents)
+        toc, _ = self.db.get_kb_toc(kb_id)
+        self.db.set_kb_toc(kb_id, toc, overview)
+        return {"overview": overview}
+
+    def _summarize_knowledge_base(self, documents: list[Any]) -> str:
+        fallback = f"知识库共包含 {len(documents)} 个文档。"
+        if not self.generator.available or not documents:
+            return fallback
+        try:
+            names = "\n".join(f"- {doc.name}" for doc in documents[:20])
+            text = self.generator.generate(
+                [
+                    {"role": "system", "content": "根据文档清单生成一段 100 字以内的中文知识库概述，只输出概述内容，不要输出其他文字。"},
+                    {"role": "user", "content": names},
+                ],
+                temperature=0.2,
+            ).strip()
+            for prefix in ("概述：", "概述:", "概述"):
+                if text.startswith(prefix):
+                    text = text[len(prefix):].strip()
+            return text or fallback
+        except Exception:
+            return fallback
 
     # 内部辅助
+
+    def _agent_cache_key(self, kb_id: str, question: str, user_id: str) -> str:
+        digest = hashlib.sha256(f"agent:{kb_id}:{user_id}:{question}".encode("utf-8")).hexdigest()
+        return f"agent:{digest}"
+
+    def _run_agent_pipeline(self, actor: User, kb_id: str, question: str, session_id: str, document_id: str | None = None) -> dict[str, Any]:
+        started = time.time()
+        cache_key = self._agent_cache_key(kb_id, question, actor.id)
+        tool_calls: list[dict[str, Any]] = []
+        answer = ""
+        reason = "ok"
+        try:
+            answer, tool_calls = self._react_agent(actor, question, kb_id, document_id)
+        except Exception as exc:
+            answer = f"工具执行失败：{exc}"
+            reason = "tool_error"
+        output_guard = self.guard.validate_output(question, answer)
+        if not output_guard.ok:
+            answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
+        self.db.add_message(session_id, "user", question, actor.id, [])
+        self.db.add_message(session_id, "assistant", answer, actor.id, [])
+        self._cache_qa(cache_key, answer, [])
+        self.logger.event("agent_pipeline_done", kb_id=kb_id, tool_calls=len(tool_calls), reason=reason)
+        return {
+            "answer": answer,
+            "sources": [],
+            "route": "agent",
+            "rewritten_query": question,
+            "elapsed_ms": (time.time() - started) * 1000,
+            "attempts": len(tool_calls),
+            "check_reason": reason,
+            "tools": [item.get("tool") for item in tool_calls],
+            "tool": tool_calls[-1].get("tool") if tool_calls else "none",
+        }
+
+    async def _stream_agent(self, actor: User, kb_id: str, question: str, session_id: str, document_id: str | None = None) -> AsyncIterator[dict[str, Any]]:
+        cache_key = self._agent_cache_key(kb_id, question, actor.id)
+        cached = self._cached_qa(cache_key)
+        if cached is not None:
+            yield {"type": "sources", "sources": cached["sources"]}
+            yield {"type": "token", "content": cached["answer"]}
+            yield {"type": "done", "rewritten_query": question}
+            return
+        yield {"type": "progress", "stage": "agent_plan", "message": "规划工具中..."}
+        transcript: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        final_text = ""
+        final_from_llm = False
+        for step in range(1, 6):
+            decision = await asyncio.to_thread(self._react_decision, question, transcript)
+            if "final" in decision:
+                final_text = str(decision.get("final") or "").strip()
+                final_from_llm = bool(final_text)
+                break
+            tool_name = str(decision.get("tool") or "")
+            args = decision.get("args") or {}
+            if tool_name not in _AGENT_TOOLS:
+                final_text = f"未知工具：{tool_name}"
+                final_from_llm = True
+                break
+            args = self._sanitize_tool_args(tool_name, args, question, kb_id, document_id)
+            yield {"type": "progress", "stage": "agent_execute", "message": f"第 {step} 步执行 {tool_name}..."}
+            try:
+                tool_result = await asyncio.to_thread(self.run_agent_tool, tool_name, args, actor)
+                observation = self._format_tool_output(tool_name, tool_result)
+            except Exception as exc:
+                observation = f"工具执行失败：{exc}"
+            transcript.append(f"第 {step} 步调用 {tool_name}：\n{observation}")
+            tool_calls.append({"tool": tool_name, "args": args})
+        else:
+            final_text = self._compose_agent_answer(question, "\n\n".join(transcript))
+        if not final_text:
+            final_text = self._compose_agent_answer(question, "\n\n".join(transcript))
+        yield {"type": "progress", "stage": "generation", "message": "生成回答中..."}
+        answer_parts: list[str] = []
+        if final_from_llm:
+            answer_parts = [final_text]
+            yield {"type": "token", "content": final_text}
+        elif self.generator.available:
+            messages = self._tool_answer_messages(question, final_text)
+            try:
+                async for token in self.generator.stream(messages):
+                    answer_parts.append(token)
+                    yield {"type": "token", "content": token}
+            except Exception:
+                answer_parts = [final_text]
+                yield {"type": "token", "content": final_text}
+        else:
+            answer_parts = [final_text]
+            yield {"type": "token", "content": final_text}
+        answer = "".join(answer_parts)
+        yield {"type": "progress", "stage": "output_guard", "message": "安全审核中..."}
+        output_guard = self.guard.validate_output(question, answer)
+        if not output_guard.ok:
+            answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
+            yield {"type": "token", "content": answer}
+        self.db.add_message(session_id, "user", question, actor.id, [])
+        self.db.add_message(session_id, "assistant", answer, actor.id, [])
+        self._cache_qa(cache_key, answer, [])
+        yield {"type": "done", "rewritten_query": question}
+
+    def _react_agent(self, actor: User, question: str, kb_id: str, document_id: str | None = None) -> tuple[str, list[dict[str, Any]]]:
+        transcript: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        for step in range(1, 6):
+            decision = self._react_decision(question, transcript)
+            if decision.get("final"):
+                final_text = str(decision.get("final") or "").strip()
+                if final_text:
+                    return final_text, tool_calls
+                break
+            tool_name = str(decision.get("tool") or "")
+            args = decision.get("args") or {}
+            if tool_name not in _AGENT_TOOLS:
+                return f"未知工具：{tool_name}", tool_calls
+            args = self._sanitize_tool_args(tool_name, args, question, kb_id, document_id)
+            try:
+                result = self.run_agent_tool(tool_name, args, actor=actor)
+                observation = self._format_tool_output(tool_name, result)
+            except Exception as exc:
+                observation = f"工具执行失败：{exc}"
+            transcript.append(f"第 {step} 步调用 {tool_name}：\n{observation}")
+            tool_calls.append({"tool": tool_name, "args": args, "observation": observation})
+        return self._compose_agent_answer(question, "\n\n".join(transcript)), tool_calls
+
+    def _react_decision(self, question: str, transcript: list[str]) -> dict[str, Any]:
+        if not self.generator.available:
+            if transcript:
+                return {"final": ""}
+            return {"tool": _choose_tool_heuristic(question), "args": {}}
+        system = (
+            "你是工具调用智能体。根据用户问题和已有工具结果，决定下一步。"
+            "可用工具：calculate（参数 expression）、sql_query（参数 query）、"
+            "plot_chart（参数 kind/x/y/title）、retrieve（参数 query/top_k）。"
+            "如果已经得到答案，输出 {\"final\": \"最终回答\"}；如果需要继续调用工具，"
+            "输出 {\"tool\": \"工具名\", \"args\": {...}}。只输出 JSON，不要解释。"
+        )
+        parts = [f"用户问题：{question}"]
+        if transcript:
+            parts.append("已有工具结果：\n" + "\n\n".join(transcript))
+        parts.append("请决定下一步。")
+        text = self.generator.generate(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": "\n\n".join(parts)},
+            ],
+            temperature=0.0,
+        )
+        decision = self._parse_json_object(text)
+        if not isinstance(decision, dict):
+            if not transcript:
+                return {"tool": _choose_tool_heuristic(question), "args": {}}
+            return {"final": ""}
+        if "final" in decision:
+            return {"final": str(decision.get("final") or "").strip()}
+        return decision
+    def _plan_agent_tool(self, question: str, kb_id: str, document_id: str | None = None) -> tuple[str, dict[str, Any]]:
+        tool_name = _choose_tool_heuristic(question)
+        args: dict[str, Any] = {}
+        if self.generator.available:
+            try:
+                plan = self._llm_plan_tool(question)
+                if plan and plan.get("tool") in _AGENT_TOOLS:
+                    tool_name = plan["tool"]
+                    args = plan.get("args") or {}
+            except Exception:
+                pass
+        return tool_name, self._sanitize_tool_args(tool_name, args, question, kb_id, document_id)
+
+    def _llm_plan_tool(self, question: str) -> dict[str, Any]:
+        system = (
+            "你是工具调用规划器，只输出 JSON，不要解释。" 
+            "可用工具：calculate（参数 expression 数学表达式）、sql_query（参数 query 只读 SQL）、" 
+            "plot_chart（参数 kind 为 bar/line/pie/scatter，x、y 为数字列表，title 标题）、" 
+            "retrieve（参数 query 检索词、top_k 数量）。" 
+            "输出格式：{\"tool\": \"工具名\", \"args\": {...}}"
+        )
+        text = self.generator.generate(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": question},
+            ],
+            temperature=0.0,
+        )
+        plan = self._parse_json_object(text)
+        if not isinstance(plan, dict):
+            raise ValueError("工具规划结果不是 JSON")
+        return plan
+
+    @staticmethod
+    def _parse_json_object(text: str) -> dict[str, Any] | None:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
+    def _sanitize_tool_args(self, tool_name: str, args: dict[str, Any], question: str, kb_id: str, document_id: str | None = None) -> dict[str, Any]:
+        args = args or {}
+        if tool_name == "calculate":
+            expression = str(args.get("expression") or _extract_expression(question) or "").strip()
+            return {"expression": expression[:500]}
+        if tool_name == "sql_query":
+            query = str(args.get("query") or question or "").strip()
+            return {"query": query[:1000]}
+        if tool_name == "plot_chart":
+            kind = str(args.get("kind") or _guess_chart_kind(question) or "line").lower()
+            if kind not in {"bar", "line", "pie", "scatter"}:
+                kind = "line"
+            default_x = [1.0, 2.0, 3.0, 4.0]
+            default_y = [3.0, 5.0, 2.0, 7.0]
+            x = _to_number_list(args.get("x"), default_x)
+            y = _to_number_list(args.get("y"), default_y)
+            size = min(len(x), len(y))
+            if size == 0:
+                x, y = default_x, default_y
+            else:
+                x, y = x[:size], y[:size]
+            return {
+                "kind": kind,
+                "x": x,
+                "y": y,
+                "title": str(args.get("title") or question[:30] or "chart"),
+            }
+        return {
+            "kb_id": kb_id,
+            "query": str(args.get("query") or question or "").strip()[:500],
+            "top_k": max(1, min(int(args.get("top_k") or 5), 20)),
+            "document_id": document_id,
+        }
+
+    def _format_tool_output(self, tool_name: str, result: dict[str, Any]) -> str:
+        if tool_name == "calculate":
+            return f"计算结果：{result.get('result')}"
+        if tool_name == "sql_query":
+            return "查询结果：" + json.dumps(result.get("result"), ensure_ascii=False)
+        if tool_name == "plot_chart":
+            return f"已生成图表：{result.get('path')}"
+        items = result.get("result") or []
+        if not items:
+            return "没有检索到相关资料。"
+        return "\n\n".join(
+            f"[{index + 1}] {item.get('document_name')}（score={item.get('score')}）\n{item.get('text')}"
+            for index, item in enumerate(items[:10])
+        )
+
+    def _tool_answer_messages(self, question: str, tool_text: str) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": "你是知识库助手。根据用户问题和工具执行结果，给出简洁、自然的中文回答；不要编造工具未提供的数据。",
+            },
+            {
+                "role": "user",
+                "content": f"问题：{question}\n工具结果：\n{tool_text}",
+            },
+        ]
+
+    def _compose_agent_answer(self, question: str, tool_text: str) -> str:
+        if not self.generator.available:
+            return tool_text
+        try:
+            answer = self.generator.generate(self._tool_answer_messages(question, tool_text), temperature=0.2).strip()
+            return answer or tool_text
+        except Exception:
+            return tool_text
 
     def _sanitize(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()[: settings.guard_max_input_length]

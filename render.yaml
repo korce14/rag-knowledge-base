@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: rag-knowledge-base
+    runtime: python
+    plan: starter
+    buildCommand: pip install .
+    startCommand: uvicorn app.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    disk:
+      name: rag-data
+      mountPath: /var/lib/rag-data
+      sizeGB: 1
+    envVars:
+      - key: RAG_DATA_DIR
+        value: /var/lib/rag-data
+      - key: RAG_ADMIN_USERNAME
+        value: korce
+      - key: RAG_ADMIN_PASSWORD
+        sync: false
+      - key: RAG_JWT_SECRET
+        generateValue: true
+      - key: RAG_GENERATION_API_KEY
+        sync: false
+      - key: RAG_GENERATION_BASE_URL
+        value: https://api.deepseek.com
+      - key: RAG_GENERATION_MODEL
+        value: deepseek-chat
+      - key: RAG_EMBEDDING_API_KEY
+        sync: false
+      - key: RAG_EMBEDDING_BASE_URL
+        value: https://api.siliconflow.cn/v1
+      - key: RAG_EMBEDDING_MODEL
+        value: BAAI/bge-m3
+      - key: RAG_EMBEDDING_DIM
+        value: "1024"
+      - key: RAG_RERANK_API_KEY
+        sync: false
+      - key: RAG_QDRANT_URL
+        sync: false
+      - key: RAG_REDIS_URL
+        sync: false
+      - key: RAG_DOCS_ENABLED
+        value: "false"

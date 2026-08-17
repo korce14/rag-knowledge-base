@@ -403,6 +403,22 @@ async function createKb() {
   if (kb) selectKb(kb.id);
 }
 
+async function pollUploadTask(taskId) {
+  for (let attempt = 0; attempt < 240; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const response = await api(`/api/tasks/${taskId}`);
+    if (!response.ok) throw new Error("导入状态查询失败");
+    const task = await response.json();
+    if (task.status === "done") return task.result;
+    if (task.status === "error") {
+      const error = new Error(task.error || "导入失败");
+      error.code = task.code;
+      throw error;
+    }
+  }
+  throw new Error("导入超时");
+}
+
 async function uploadDocument() {
   if (!state.currentKbId) {
     showToast("请先选择或创建一个知识库");
@@ -422,15 +438,28 @@ async function uploadDocument() {
     });
     if (response.status === 409) {
       showToast(`已存在相同文档：${file.name}`);
-    } else if (!response.ok) {
+      continue;
+    }
+    if (!response.ok) {
       const detail = (await response.json().catch(() => ({}))).detail || "导入失败";
       showToast(`${file.name}：${detail}`);
+      continue;
+    }
+    const task = await response.json();
+    try {
+      await pollUploadTask(task.task_id);
+      showToast(`${file.name}：导入完成`);
+    } catch (error) {
+      if (error.code === 409) {
+        showToast(`已存在相同文档：${file.name}`);
+      } else {
+        showToast(`${file.name}：${error.message}`);
+      }
     }
   }
   $("#fileInput").value = "";
   $("#tagInput").value = "";
   await loadDocuments();
-  showToast("文档导入完成");
 }
 
 function addMessage(role, text, messageId = null) {
@@ -693,8 +722,6 @@ async function init() {
     await loadSettings();
     await loadKbs();
     await loadSessions();
-  } else {
-    openAuth();
   }
   resizeTextarea();
 }

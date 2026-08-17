@@ -85,6 +85,15 @@ class BM25:
             for term in set(tokens):
                 self.doc_freq[term] += 1
 
+    def fit_token_lists(self, corpus: list[list[str]]) -> None:
+        self.corpus = [list(tokens) for tokens in corpus]
+        self.doc_len = [len(tokens) for tokens in self.corpus]
+        self.avgdl = sum(self.doc_len) / max(len(self.doc_len), 1)
+        self.doc_freq = Counter()
+        for tokens in self.corpus:
+            for term in set(tokens):
+                self.doc_freq[term] += 1
+
     def scores(self, query: str) -> list[float]:
         if not self.corpus:
             return []

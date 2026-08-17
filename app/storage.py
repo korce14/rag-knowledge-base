@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import sqlite3
@@ -175,11 +175,44 @@ class Database:
                     resolved INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    revoked INTEGER NOT NULL DEFAULT 0,
+                    last_used_at TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS data_sources (
+                    id TEXT PRIMARY KEY,
+                    kb_id TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    interval_minutes INTEGER NOT NULL DEFAULT 60,
+                    last_synced_at TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS bm25_index (
+                    chunk_id TEXT PRIMARY KEY,
+                    kb_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    tokens_json TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
 
         # 兼容旧数据库：documents 表补充 access_mode 列。
         self._ensure_column("documents", "access_mode", "TEXT NOT NULL DEFAULT 'public'")
+        self._ensure_column("knowledge_bases", "toc_json", "TEXT NOT NULL DEFAULT '{}'")
+        self._ensure_column("knowledge_bases", "overview", "TEXT NOT NULL DEFAULT ''")
         self._ensure_column("feedback", "rating_value", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("feedback", "kb_id", "TEXT")
         self._ensure_column("feedback", "document_id", "TEXT")
@@ -215,7 +248,161 @@ class Database:
 
     # 文档
 
+    def set_kb_toc(self, kb_id: str, toc: list[dict[str, Any]], overview: str) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE knowledge_bases SET toc_json = ?, overview = ? WHERE id = ?",
+                (json.dumps(toc, ensure_ascii=False), overview, kb_id),
+            )
+
+    def get_kb_toc(self, kb_id: str) -> tuple[list[dict[str, Any]], str]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT toc_json, overview FROM knowledge_bases WHERE id = ?", (kb_id,)
+            ).fetchone()
+        if not row:
+            return [], ""
+        try:
+            toc = json.loads(row["toc_json"] or "{}")
+            toc = toc if isinstance(toc, list) else []
+        except json.JSONDecodeError:
+            toc = []
+        return toc, str(row["overview"] or "")
+
+    def create_api_key(self, name: str, user_id: str, key_hash: str) -> dict[str, Any]:
+        key_id = _new_id("key")
+        created_at = _now()
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO api_keys(id, user_id, name, key_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                (key_id, user_id, name, key_hash, created_at),
+            )
+        return {"id": key_id, "name": name, "created_at": created_at}
+
+    def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT id, name, revoked, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM api_keys WHERE key_hash = ? AND revoked = 0", (key_hash,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def touch_api_key(self, key_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("UPDATE api_keys SET last_used_at = ? WHERE id = ?", (_now(), key_id))
+
+    def revoke_api_key(self, key_id: str, user_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("UPDATE api_keys SET revoked = 1 WHERE id = ? AND user_id = ?", (key_id, user_id))
+
+    def save_bm25_tokens(self, kb_id: str, chunk_tokens: dict[str, tuple[str, str, list[str]]]) -> None:
+        updated_at = _now()
+        with self.connection() as conn:
+            for chunk_id, (document_id, text, tokens) in chunk_tokens.items():
+                conn.execute(
+                    "INSERT INTO bm25_index(chunk_id, kb_id, document_id, tokens_json, text, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(chunk_id) DO UPDATE SET kb_id=excluded.kb_id, document_id=excluded.document_id, tokens_json=excluded.tokens_json, text=excluded.text, updated_at=excluded.updated_at",
+                    (chunk_id, kb_id, document_id, json.dumps(tokens, ensure_ascii=False), text, updated_at),
+                )
+
+    def get_bm25_tokens(self, kb_id: str, chunk_ids: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        sql = "SELECT chunk_id, document_id, tokens_json, text FROM bm25_index WHERE kb_id = ?"
+        params: list[Any] = [kb_id]
+        if chunk_ids:
+            placeholders = ",".join("?" for _ in chunk_ids)
+            sql += f" AND chunk_id IN ({placeholders})"
+            params.extend(chunk_ids)
+        with self.connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        result = {}
+        for row in rows:
+            try:
+                tokens = json.loads(row["tokens_json"] or "[]")
+            except json.JSONDecodeError:
+                tokens = []
+            result[row["chunk_id"]] = {"document_id": row["document_id"], "text": row["text"], "tokens": tokens}
+        return result
+
+    def delete_bm25_tokens(self, kb_id: str | None = None, document_id: str | None = None) -> None:
+        sql = "DELETE FROM bm25_index WHERE 1=1"
+        params: list[Any] = []
+        if kb_id:
+            sql += " AND kb_id = ?"; params.append(kb_id)
+        if document_id:
+            sql += " AND document_id = ?"; params.append(document_id)
+        with self.connection() as conn:
+            conn.execute(sql, params)
+
     def add_document(self, record: DocumentRecord) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO documents(id, kb_id, name, file_path, content_hash, status, access_mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (record.id, record.kb_id, record.name, record.file_path, record.content_hash, record.status, record.access_mode, record.created_at),
+            )
+
+    def create_source(self, kb_id: str, kind: str, name: str, config: dict[str, Any], interval_minutes: int = 60) -> dict[str, Any]:
+        source_id = _new_id("src")
+        created_at = _now()
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO data_sources(id, kb_id, kind, name, config_json, interval_minutes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (source_id, kb_id, kind, name, json.dumps(config, ensure_ascii=False), interval_minutes, created_at),
+            )
+        return {"id": source_id, "kb_id": kb_id, "kind": kind, "name": name, "config": config, "interval_minutes": interval_minutes, "enabled": 1, "created_at": created_at}
+
+    def list_sources(self, kb_id: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM data_sources"
+        params: list[Any] = []
+        if kb_id:
+            sql += " WHERE kb_id = ?"
+            params.append(kb_id)
+        sql += " ORDER BY created_at DESC"
+        with self.connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["config"] = json.loads(item.pop("config_json") or "{}")
+            except json.JSONDecodeError:
+                item["config"] = {}
+            result.append(item)
+        return result
+
+    def update_source(self, source_id: str, *, name: str | None = None, config: dict[str, Any] | None = None, enabled: bool | None = None, interval_minutes: int | None = None) -> None:
+        sets: list[str] = []
+        params: list[Any] = []
+        if name is not None:
+            sets.append("name = ?"); params.append(name)
+        if config is not None:
+            sets.append("config_json = ?"); params.append(json.dumps(config, ensure_ascii=False))
+        if enabled is not None:
+            sets.append("enabled = ?"); params.append(1 if enabled else 0)
+        if interval_minutes is not None:
+            sets.append("interval_minutes = ?"); params.append(interval_minutes)
+        if not sets:
+            return
+        params.append(source_id)
+        with self.connection() as conn:
+            conn.execute(f"UPDATE data_sources SET {', '.join(sets)} WHERE id = ?", params)
+
+    def delete_source(self, source_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("DELETE FROM data_sources WHERE id = ?", (source_id,))
+
+    def mark_source_synced(self, source_id: str) -> None:
+        with self.connection() as conn:
+            conn.execute("UPDATE data_sources SET last_synced_at = ? WHERE id = ?", (_now(), source_id))
         with self.connection() as conn:
             conn.execute(
                 """
