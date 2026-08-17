@@ -36,6 +36,11 @@
         <div id="documentList" class="document-list"></div>
       </div>
 
+
+      <button id="usersButton" class="ghost-button full-width">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        用户管理
+      </button>
       <button id="settingsButton" class="ghost-button full-width">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1A7 7 0 0 0 15 6l-.4-2.5h-4L10.2 6a7 7 0 0 0-1.6 1l-2.4-1-2 3.4L6.2 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.6 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.6-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg>
         登录 / 用户
@@ -118,6 +123,27 @@
         <button id="askDocumentButton" class="primary-button" type="button">提问</button>
       </div>
       <div id="documentAnswer" class="document-answer"></div>
+    </div>
+  </div>
+
+  <div id="usersDialog" class="dialog-backdrop hidden">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <h2>用户管理</h2>
+        <button type="button" id="closeUsers" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <label class="field-label" for="newUsername">用户名</label>
+      <input id="newUsername" class="text-input" type="text" placeholder="至少 3 个字符">
+      <label class="field-label" for="newPassword">密码</label>
+      <input id="newPassword" class="text-input" type="password" placeholder="至少 8 个字符">
+      <label class="field-label" for="newRole">角色</label>
+      <select id="newRole" class="text-input">
+        <option value="viewer">查看者</option>
+        <option value="editor">编辑者</option>
+        <option value="admin">管理员</option>
+      </select>
+      <button id="createUserButton" class="primary-button full-width" type="button">创建用户</button>
+      <div id="userList" class="document-list"></div>
     </div>
   </div>
   <div id="toast" class="toast hidden"></div>

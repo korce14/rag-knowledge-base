@@ -648,10 +648,11 @@ class KnowledgeBaseService:
                 "document_id": hit.chunk.document_id,
                 "document_name": hit.chunk.document_name,
                 "chunk_index": hit.chunk.index,
+                "context_index": index + 1,
                 "score": round(hit.score, 4),
                 "text_preview": hit.chunk.text[:220],
             }
-            for hit in hits
+            for index, hit in enumerate(hits, start=1)
         ]
 
     def _ensure_kb(self, kb_id: str) -> KnowledgeBase:
@@ -680,6 +681,7 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+
 
 
 

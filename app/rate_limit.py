@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import defaultdict, deque
 
@@ -34,7 +35,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/api/"):
-            client = request.client.host if request.client else "unknown"
+            auth = request.headers.get("authorization", "")
+            token = auth.split(" ")[-1] if auth else ""
+            client = (
+                hashlib.sha256(token.encode("utf-8")).hexdigest()
+                if token
+                else (request.client.host if request.client else "unknown")
+            )
             if not self.limiter.allow(client):
                 return JSONResponse({"detail": "请求过于频繁，请稍后再试"}, status_code=429)
         return await call_next(request)

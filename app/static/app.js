@@ -33,6 +33,16 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function renderMarkdown(text) {
+  const escaped = escapeHtml(text);
+  const withCode = escaped.replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>");
+  const withInline = withCode.replace(/`([^`]+)`/g, "<code>$1</code>");
+  const withBold = withInline.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const withHeadings = withBold.replace(/^### (.+)$/gm, "<h4>$1</h4>").replace(/^## (.+)$/gm, "<h3>$1</h3>").replace(/^# (.+)$/gm, "<h2>$1</h2>");
+  const withLists = withHeadings.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+  return withLists.replace(/\n/g, "<br>");
+}
+
 function capabilityBadge(label, active) {
   return `<span class="capability ${active ? "active" : ""}">${label}</span>`;
 }
@@ -206,6 +216,7 @@ async function loadKbPermissions() {
   if (!usersResponse.ok || !permsResponse.ok) return;
   const users = await usersResponse.json();
   const permissions = await permsResponse.json();
+  const userMap = Object.fromEntries(users.map((user) => [user.id, user.username]));
   const userSelect = $("#kbPermissionUser");
   userSelect.innerHTML = users.map((user) => `<option value="${user.id}">${escapeHtml(user.username)}</option>`).join("");
   const list = $("#kbPermissionList");
@@ -215,7 +226,7 @@ async function loadKbPermissions() {
   }
   list.innerHTML = permissions.map((item) => `
     <div class="document-item">
-      <span>${escapeHtml(item.user_id)} · ${escapeHtml(item.role)}</span>
+      <span>${escapeHtml(userMap[item.user_id] || item.user_id)} · ${escapeHtml(item.role)}</span>
       <button class="icon-button small danger" data-revoke-user="${item.user_id}">×</button>
     </div>`).join("");
   list.querySelectorAll("[data-revoke-user]").forEach((button) => {
@@ -245,6 +256,56 @@ async function addKbPermission() {
 
 function closeKbPermissions() {
   $("#kbPermissionsDialog").classList.add("hidden");
+}
+
+async function openUsers() {
+  $("#usersDialog").classList.remove("hidden");
+  await loadUsers();
+}
+
+function closeUsers() {
+  $("#usersDialog").classList.add("hidden");
+}
+
+async function loadUsers() {
+  const response = await api("/api/users");
+  if (!response.ok) return;
+  const users = await response.json();
+  const list = $("#userList");
+  if (!users.length) {
+    list.innerHTML = `<div class="document-item">没有用户</div>`;
+    return;
+  }
+  list.innerHTML = users.map((user) => `
+    <div class="document-item">
+      <span>${escapeHtml(user.username)} · ${escapeHtml(user.role)}${user.is_active ? "" : " · 已禁用"}</span>
+      <button class="icon-button small danger" data-delete-user="${user.id}">×</button>
+    </div>`).join("");
+  list.querySelectorAll("[data-delete-user]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api(`/api/users/${button.dataset.deleteUser}`, { method: "DELETE" });
+      await loadUsers();
+    });
+  });
+}
+
+async function createUser() {
+  const username = $("#newUsername").value.trim();
+  const password = $("#newPassword").value;
+  const role = $("#newRole").value;
+  const response = await api("/api/users", {
+    method: "POST",
+    body: JSON.stringify({ username, password, role, is_active: true }),
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))).detail || "创建失败";
+    showToast(detail);
+    return;
+  }
+  $("#newUsername").value = "";
+  $("#newPassword").value = "";
+  await loadUsers();
+  showToast("用户已创建");
 }
 
 async function createKb() {
@@ -311,7 +372,7 @@ function addSources(row, sources) {
   node.innerHTML = sources
     .map(
       (source) =>
-        `<div class="source-item"><strong>[${source.chunk_index + 1}] ${escapeHtml(source.document_name)}</strong><br>${escapeHtml(source.text_preview)}</div>`,
+        `<div class="source-item"><strong>[${source.context_index || source.chunk_index + 1}] ${escapeHtml(source.document_name)}</strong><br>${escapeHtml(source.text_preview)}</div>`,
     )
     .join("");
   row.appendChild(node);
@@ -354,19 +415,26 @@ async function sendMessage() {
     content.textContent = "请求失败，请稍后重试。";
     return;
   }
-  const text = await response.text();
-  const dataLines = text.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("data:"));
-  for (const line of dataLines) {
-    const start = line.indexOf("{");
-    const end = line.lastIndexOf("}");
-    const event = JSON.parse(line.slice(start, end + 1));
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answerText = "";
+
+  const processLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return;
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start < 0 || end < 0) return;
+    const event = JSON.parse(trimmed.slice(start, end + 1));
     if (event.type === "progress") {
       progress.textContent = event.message;
       progress.classList.remove("hidden");
     }
     if (event.type === "token") {
       progress.classList.add("hidden");
-      content.textContent += event.content;
+      answerText += event.content;
+      content.innerHTML = renderMarkdown(answerText);
       $("#chat").scrollTop = $("#chat").scrollHeight;
     }
     if (event.type === "sources") {
@@ -375,7 +443,18 @@ async function sendMessage() {
     if (event.type === "error") {
       content.textContent = event.reason;
     }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) processLine(line);
   }
+  if (buffer.trim()) processLine(buffer);
+  if (answerText) content.innerHTML = renderMarkdown(answerText);
   progress.classList.add("hidden");
 }
 
@@ -440,6 +519,7 @@ async function login(event) {
 function setupEvents() {
   $("#newKbButton").addEventListener("click", createKb);
   $("#settingsButton").addEventListener("click", openAuth);
+  $("#usersButton").addEventListener("click", openUsers);
   $("#closeSettings").addEventListener("click", closeAuth);
   $("#logoutButton").addEventListener("click", () => {
     logout();
@@ -457,6 +537,8 @@ function setupEvents() {
   $("#settingsForm").addEventListener("submit", login);
   $("#closeKbPermissions").addEventListener("click", closeKbPermissions);
   $("#addKbPermissionButton").addEventListener("click", addKbPermission);
+  $("#closeUsers").addEventListener("click", closeUsers);
+  $("#createUserButton").addEventListener("click", createUser);
   $("#closeDocumentViewer").addEventListener("click", closeDocumentViewer);
   $("#askDocumentButton").addEventListener("click", askDocument);
 }
@@ -474,6 +556,8 @@ async function init() {
 }
 
 init();
+
+
 
 
 
