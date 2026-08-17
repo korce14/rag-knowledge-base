@@ -540,6 +540,18 @@ class Database:
             )
 
 
+    def list_messages(self, session_id: str, user_id: str | None = None, limit: int = 12) -> list[dict[str, str]]:
+        sql = "SELECT role, content FROM messages WHERE session_id = ?"
+        params: list[Any] = [session_id]
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(user_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self.connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+
     def add_feedback(self, session_id: str, question: str, answer: str, rating: str) -> None:
         with self.connection() as conn:
             conn.execute(
@@ -547,6 +559,13 @@ class Database:
                 (session_id, question, answer, rating, _now()),
             )
 
+
+    def add_audit_log(self, user_id: str, action: str, resource_type: str, resource_id: str, detail: str = "") -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO audit_logs(user_id, action, resource_type, resource_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, action, resource_type, resource_id, detail, _now()),
+            )
     def add_feedback_signal(
         self,
         session_id: str,

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from .auth import AuthPrincipal, CurrentUser, get_current_user
 from .config import settings
 from .models import Role
 from .rate_limit import RateLimitMiddleware
+from .rate_limit import SlidingWindowLimiter
 from .pipeline import KnowledgeBaseService
 
 
@@ -46,6 +47,7 @@ class ShareDocumentRequest(BaseModel):
     user_id: str
 
 
+login_limiter = SlidingWindowLimiter(settings.login_rate_limit_per_minute, 60)
 service = KnowledgeBaseService()
 app = FastAPI(title="RAG 知识库", version="2.0.0", docs_url="/docs" if settings.docs_enabled else None, redoc_url="/redoc" if settings.docs_enabled else None, openapi_url="/openapi.json" if settings.docs_enabled else None)
 app.state.service = service
@@ -65,7 +67,9 @@ async def health() -> dict:
 
 
 @app.post("/api/auth/login")
-async def login(payload: LoginRequest) -> dict:
+async def login(payload: LoginRequest, request: Request) -> dict:
+    if not login_limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
     user = service.login(payload.username, payload.password)
     from .security import create_access_token
 
@@ -361,6 +365,9 @@ def _short_id() -> str:
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
+
+
 
 
 

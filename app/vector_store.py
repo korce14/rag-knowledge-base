@@ -168,13 +168,6 @@ class QdrantVectorStore:
             return hits
         except Exception:
             return []
-        if not self.enabled:
-            return 0
-        name = _collection_name(kb_id)
-        client = self._get_client()
-        if not client.collection_exists(name):
-            return 0
-        return int(client.count(collection_name=name, exact=True).count)
 
 
 VectorStore = QdrantVectorStore

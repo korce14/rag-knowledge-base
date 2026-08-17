@@ -405,8 +405,13 @@ class KnowledgeBaseService:
                 self._retriever_cache.pop(key, None)
 
     def get_retriever_for_documents(self, kb_id: str, document_ids: list[str]) -> Retriever:
+        key = (kb_id, *sorted(document_ids))
+        if key in self._retriever_cache:
+            return self._retriever_cache[key]
         chunks = self.db.list_chunks_by_documents(kb_id, document_ids)
-        return Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
+        retriever = Retriever(chunks=chunks, kb_id=kb_id, vector_store=self.vector_store, embedder=self.embedder)
+        self._retriever_cache[key] = retriever
+        return retriever
 
     def search_visible(
         self,
@@ -465,7 +470,7 @@ class KnowledgeBaseService:
 
         question = self._sanitize(question)
         cache_key = self._qa_cache_key(kb_id, question, actor.id)
-        yield {"type": "progress", "stage": "cache", "message": "缓存检查中..."}
+
         cached = self._cached_qa(cache_key)
         if cached is not None:
             return QueryResult(
@@ -675,6 +680,8 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+
+
 
 
 
