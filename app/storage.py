@@ -156,6 +156,16 @@ class Database:
                     detail TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS retrieval_gaps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kb_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    question TEXT NOT NULL,
+                    best_score REAL NOT NULL DEFAULT 0,
+                    resolved INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -575,6 +585,25 @@ class Database:
             )
 
 
+
+    def add_retrieval_gap(self, kb_id: str, user_id: str, question: str, best_score: float) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO retrieval_gaps(kb_id, user_id, question, best_score, created_at) VALUES (?, ?, ?, ?, ?)",
+                (kb_id, user_id, question, best_score, _now()),
+            )
+
+    def list_retrieval_gaps(self, kb_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM retrieval_gaps"
+        params: list[Any] = []
+        if kb_id:
+            sql += " WHERE kb_id = ?"
+            params.append(kb_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self.connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
     def add_audit_log(self, user_id: str, action: str, resource_type: str, resource_id: str, detail: str = "") -> None:
         with self.connection() as conn:
             conn.execute(

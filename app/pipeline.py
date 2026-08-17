@@ -434,6 +434,8 @@ class KnowledgeBaseService:
         reranked = self.reranker.rerank(query, hits)
         weighted = self.feedback_weights.apply(kb_id, reranked)
         self.logger.event("retrieval_done", kb_id=kb_id, query=query[:120], result_count=len(weighted), visible_documents=len(visible_ids))
+        if weighted and weighted[0].score < 0.3:
+            self.db.add_retrieval_gap(kb_id, actor.id, query, weighted[0].score)
         return weighted
     def search(
         self,
@@ -644,6 +646,10 @@ class KnowledgeBaseService:
             except Exception:
                 result["qdrant_ok"] = False
         return result
+
+    def list_retrieval_gaps(self, actor: User, kb_id: str | None = None) -> list[dict[str, Any]]:
+        self._require_global_role(actor, Role.ADMIN)
+        return self.db.list_retrieval_gaps(kb_id)
 
     def prompt_versions(self) -> dict[str, Any]:
         return self.guard.prompt_version()

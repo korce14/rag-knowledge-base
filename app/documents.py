@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import re
@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from .config import settings
+from .cleaner import clean_text, detect_and_decode
+from .cleaner import deduplicate_chunks
 from .models import Chunk, DocumentRecord
 from .storage import Database, _new_id, _now
 from .text import chunk_text
@@ -14,7 +16,7 @@ from .text import chunk_text
 def extract_text(path: Path, filename: str = "") -> str:
     suffix = path.suffix.lower()
     if suffix in {".txt", ".md", ".markdown", ".csv", ".json", ".log"}:
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return clean_text(detect_and_decode(path.read_bytes()))
     if suffix in {".docx"}:
         from docx import Document
 
@@ -25,7 +27,7 @@ def extract_text(path: Path, filename: str = "") -> str:
                 row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
                 if row_text:
                     parts.append(row_text)
-        return "\n\n".join(parts)
+        return clean_text("\n\n".join(parts))
     if suffix in {".pdf"}:
         import pdfplumber
 
@@ -33,7 +35,7 @@ def extract_text(path: Path, filename: str = "") -> str:
         with pdfplumber.open(path) as pdf:
             for page in pdf.pages:
                 pages.append(page.extract_text() or "")
-        return "\n\n".join(pages)
+        return clean_text("\n\n".join(pages))
     raise ValueError(f"暂不支持的文件类型：{suffix or filename}")
 
 
@@ -72,6 +74,7 @@ def _build_document_record(kb_id: str, file_path: Path, text: str, access_mode: 
 
 def build_chunks(kb_id: str, document: DocumentRecord, text: str, tags: list[str]) -> list[Chunk]:
     parts = chunk_text(text, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
+    parts = deduplicate_chunks(parts)
     chunks: list[Chunk] = []
     for index, part in enumerate(parts):
         chunks.append(
@@ -115,3 +118,4 @@ def ingest_file_with_mode(
 def delete_document(db: Database, vector_store: Any, kb_id: str, document_id: str) -> None:
     db.delete_document(document_id)
     vector_store.delete_document(kb_id, document_id)
+

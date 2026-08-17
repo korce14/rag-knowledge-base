@@ -87,6 +87,10 @@ async def get_settings(principal: CurrentUser) -> dict:
     return service.capabilities()
 
 
+
+@app.get("/api/analytics/gaps")
+async def list_retrieval_gaps(principal: CurrentUser, kb_id: str | None = None) -> list[dict]:
+    return service.list_retrieval_gaps(principal.user, kb_id)
 @app.get("/api/prompts")
 async def list_prompts(principal: CurrentUser) -> dict:
     return service.prompt_versions()
