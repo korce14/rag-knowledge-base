@@ -316,6 +316,10 @@ async def search(payload: dict, principal: CurrentUser) -> dict:
 @app.post("/api/route")
 async def route(payload: dict, principal: CurrentUser) -> dict:
     return {"route": service.route_query(str(payload.get("question", "")))}
+
+@app.post("/api/agent")
+async def agent(payload: dict, principal: CurrentUser) -> dict:
+    return service.run_agent_tool(str(payload.get("tool", "")), payload.get("args", {}) or {})
 @app.post("/api/chat")
 async def chat(payload: dict, principal: CurrentUser) -> dict:
     kb_id = str(payload.get("kb_id", "")).strip()

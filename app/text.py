@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from collections import Counter
 from math import log
+from .cleaner import clean_text
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
@@ -26,15 +27,6 @@ def _cut_chinese(text: str) -> list[str]:
     except Exception:
         return list(text)
 
-
-def clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = text.replace("\u3000", " ").replace("\xa0", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
-    return text.strip()
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str]:

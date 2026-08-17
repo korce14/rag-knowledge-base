@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
@@ -30,7 +30,8 @@ def deduplicate_chunks(chunks: list[str], threshold: float = 0.95) -> list[str]:
         chunk = clean_text(chunk)
         if not chunk:
             continue
-        if any(SequenceMatcher(None, chunk, existing).ratio() >= threshold for existing in result):
+        if any(SequenceMatcher(None, chunk, existing).ratio() >= threshold for existing in result[-50:]):
             continue
         result.append(chunk)
     return result
+

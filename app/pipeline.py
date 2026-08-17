@@ -287,7 +287,7 @@ class KnowledgeBaseService:
         if self.embedder.available and chunks:
             try:
                 vectors = self.embedder.embed([chunk.text for chunk in chunks])
-                self.vector_store.replace_document(kb_id, record.id, [chunk.id for chunk in chunks], vectors)
+                self.vector_store.replace_document(kb_id, record.id, [chunk.id for chunk in chunks], vectors, [{"tags": chunk.tags} for chunk in chunks])
             except Exception as exc:
                 self.logger.event("qdrant_ingest_failed", kb_id=kb_id, document_id=record.id, error=str(exc))
         self.resilience.cache.clear()
@@ -724,6 +724,10 @@ class KnowledgeBaseService:
             return "agent"
         return "rag"
 
+    def run_agent_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        from .agent_runner import run_tool
+        return run_tool(name, args, service=self)
+
     # 内部辅助
 
     def _sanitize(self, text: str) -> str:
@@ -769,6 +773,7 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+
 
 
 

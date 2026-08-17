@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
@@ -31,6 +31,11 @@ def plot_chart(kind: str, x: list[float], y: list[float], title: str = "chart") 
         import matplotlib.pyplot as plt
     except ImportError:
         raise RuntimeError("matplotlib 未安装")
+    from matplotlib import font_manager
+    font_manager.fontManager.addfont(str(Path(settings.data_dir) / "fonts" / "SimHei.ttf")) if (Path(settings.data_dir) / "fonts" / "SimHei.ttf").exists() else None
+    import matplotlib
+    matplotlib.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]
+    matplotlib.rcParams["axes.unicode_minus"] = False
 
     figure, axis = plt.subplots(figsize=(6, 4))
     if kind == "bar":
@@ -50,10 +55,10 @@ def plot_chart(kind: str, x: list[float], y: list[float], title: str = "chart") 
     return str(path)
 
 
-def retrieve(kb_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+def retrieve(kb_id: str, query: str, top_k: int = 5, service=None) -> list[dict[str, Any]]:
     from .pipeline import KnowledgeBaseService
 
-    service = KnowledgeBaseService()
+    service = service or KnowledgeBaseService()
     admin = service.db.get_user_by_username(settings.admin_username) or service.db.get_user_by_username("korce")
     if admin is None:
         return []
@@ -66,3 +71,4 @@ def retrieve(kb_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         }
         for hit in hits
     ]
+

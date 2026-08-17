@@ -42,6 +42,7 @@ class Retriever:
                         top_k=max(top_k * 3, 10),
                         allowed_ids=set(allowed_ids),
                         document_ids=allowed_doc_ids,
+                        tags=tags,
                     )
                 )
             except Exception:

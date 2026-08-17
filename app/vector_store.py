@@ -130,6 +130,7 @@ class QdrantVectorStore:
         top_k: int = 10,
         allowed_ids: set[str] | None = None,
         document_ids: set[str] | None = None,
+        tags: list[str] | None = None,
     ) -> list[tuple[str, float]]:
         if not self.enabled:
             return []
@@ -144,11 +145,12 @@ class QdrantVectorStore:
             if allowed_ids is not None:
                 search_limit = max(search_limit * 4, 20)
 
-            query_filter = None
+            conditions = []
             if document_ids is not None:
-                query_filter = models.Filter(
-                    must=[models.FieldCondition(key="document_id", match=models.MatchAny(any=list(document_ids)))]
-                )
+                conditions.append(models.FieldCondition(key="document_id", match=models.MatchAny(any=list(document_ids))))
+            if tags:
+                conditions.append(models.FieldCondition(key="tags", match=models.MatchAny(any=tags)))
+            query_filter = models.Filter(must=conditions) if conditions else None
             result = client.query_points(
                 collection_name=name,
                 query=np.asarray(query_vector, dtype=np.float32).reshape(1, -1).tolist()[0],
@@ -171,6 +173,7 @@ class QdrantVectorStore:
 
 
 VectorStore = QdrantVectorStore
+
 
 
 
