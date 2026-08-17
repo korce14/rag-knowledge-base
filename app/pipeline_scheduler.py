@@ -123,7 +123,7 @@ class AgentStep(PipelineStep):
         if not checked.ok:
             answer_text = "回答被安全策略拦截，请尝试更具体或合规的问题。"
 
-        self.record("messages", session_id, question, answer_text, context.actor.id)
+        self.record("messages", session_id, question, answer_text, context.actor.id, sources)
         self.cache_write(context.state["cache_key"], answer_text, sources)
         context.result = {
             "answer": answer_text,
@@ -146,4 +146,5 @@ class PipelineScheduler:
             if not step.run(context):
                 return context.result or {}
         return context.result or {}
+
 

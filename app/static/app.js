@@ -194,7 +194,7 @@ async function loadSessionMessages() {
   if (!response.ok) return;
   const messages = await response.json();
   for (const message of messages) {
-    addHistoryMessage(message.role, message.content, message.id);
+    addHistoryMessage(message.role, message.content, message.id, message.sources || []);
   }
 }
 
@@ -402,7 +402,7 @@ function addMessage(role, text, messageId = null) {
       if (response.ok) row.remove();
     });
   }
-  return row.querySelector(`.${role}-content`);
+  return row;
 }
 function addSources(row, sources) {
   if (!sources.length) return;
@@ -495,6 +495,8 @@ async function sendMessage() {
   if (buffer.trim()) processLine(buffer);
   if (answerText) content.innerHTML = renderMarkdown(answerText);
   progress.classList.add("hidden");
+  $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+  await loadSessionMessages();
 }
 
 function resizeTextarea() {
@@ -600,6 +602,8 @@ async function init() {
 }
 
 init();
+
+
 
 
 

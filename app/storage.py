@@ -130,6 +130,7 @@ class Database:
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     user_id TEXT,
+                    sources_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id);
@@ -164,6 +165,7 @@ class Database:
         self._ensure_column("feedback", "kb_id", "TEXT")
         self._ensure_column("feedback", "document_id", "TEXT")
         self._ensure_column("messages", "user_id", "TEXT")
+        self._ensure_column("messages", "sources_json", "TEXT NOT NULL DEFAULT '[]'")
 
     # 知识库
 
@@ -532,11 +534,11 @@ class Database:
 
     # 对话与反馈
 
-    def add_message(self, session_id: str, role: str, content: str, user_id: str | None = None) -> None:
+    def add_message(self, session_id: str, role: str, content: str, user_id: str | None = None, sources: list[dict[str, Any]] | None = None) -> None:
         with self.connection() as conn:
             conn.execute(
-                "INSERT INTO messages(session_id, role, content, user_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, role, content, user_id, _now()),
+                "INSERT INTO messages(session_id, role, content, user_id, sources_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, role, content, user_id, json.dumps(sources or [], ensure_ascii=False), _now()),
             )
 
 
@@ -554,7 +556,7 @@ class Database:
 
 
     def list_messages(self, session_id: str, user_id: str | None = None, limit: int = 12) -> list[dict[str, str]]:
-        sql = "SELECT id, role, content FROM messages WHERE session_id = ?"
+        sql = "SELECT id, role, content, sources_json FROM messages WHERE session_id = ?"
         params: list[Any] = [session_id]
         if user_id is not None:
             sql += " AND user_id = ?"
@@ -563,7 +565,7 @@ class Database:
         params.append(limit)
         with self.connection() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [{"id": row["id"], "role": row["role"], "content": row["content"]} for row in reversed(rows)]
+        return [{"id": row["id"], "role": row["role"], "content": row["content"], "sources": json.loads(row["sources_json"] or "[]")} for row in reversed(rows)]
 
     def add_feedback(self, session_id: str, question: str, answer: str, rating: str) -> None:
         with self.connection() as conn:
@@ -611,6 +613,8 @@ def _new_id(prefix: str) -> str:
     import uuid
 
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
 
 
 

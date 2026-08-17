@@ -75,14 +75,14 @@ class KnowledgeBaseService:
         def history_loader(_: str, session_id: str, user_id: str):
             return self.db.list_messages(session_id, user_id)
 
-        def message_recorder(_: str, session_id: str, question: str, answer: str, user_id: str):
-            self.db.add_message(session_id, "user", question, user_id)
-            self.db.add_message(session_id, "assistant", answer, user_id)
+        def message_recorder(_: str, session_id: str, question: str, answer: str, user_id: str, sources: list[dict[str, Any]] | None = None):
+            self.db.add_message(session_id, "user", question, user_id, [])
+            self.db.add_message(session_id, "assistant", answer, user_id, sources)
 
-        def record(kind: str, session_id: str, question: str | None = None, answer: str | None = None, user_id: str | None = None):
+        def record(kind: str, session_id: str, question: str | None = None, answer: str | None = None, user_id: str | None = None, sources: list[dict[str, Any]] | None = None):
             if kind == "history":
                 return history_loader("history", session_id, user_id)
-            message_recorder("messages", session_id, question, answer, user_id)
+            message_recorder("messages", session_id, question, answer, user_id, sources)
 
         steps = [
             GuardStep(self.guard.validate_input),
@@ -499,8 +499,8 @@ class KnowledgeBaseService:
         if not output_guard.ok:
             answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
 
-        self.db.add_message(session_id, "user", question, actor.id)
-        self.db.add_message(session_id, "assistant", answer, actor.id)
+        self.db.add_message(session_id, "user", question, actor.id, [])
+        self.db.add_message(session_id, "assistant", answer, actor.id, sources)
         self._cache_qa(cache_key, answer, sources)
         return QueryResult(
             answer=answer,
@@ -571,8 +571,8 @@ class KnowledgeBaseService:
             answer = "回答被安全策略拦截，请尝试更具体或合规的问题。"
             yield {"type": "token", "content": answer}
 
-        self.db.add_message(session_id, "user", question, actor.id)
-        self.db.add_message(session_id, "assistant", answer, actor.id)
+        self.db.add_message(session_id, "user", question, actor.id, [])
+        self.db.add_message(session_id, "assistant", answer, actor.id, sources)
         self._cache_qa(cache_key, answer, sources)
         yield {"type": "done", "rewritten_query": rewritten}
 
@@ -693,6 +693,7 @@ class KnowledgeBaseService:
 
     def _require_document_access(self, actor: User, document: Any, minimum: Role) -> None:
         self.access_control.require_document_access(actor, document, minimum)
+
 
 
 
