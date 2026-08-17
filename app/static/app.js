@@ -148,6 +148,17 @@ async function askDocument() {
 async function selectKb(kbId) {
   state.currentKbId = kbId;
 
+  const kb = state.kbs.find((item) => item.id === kbId);
+  $("#currentKbName").textContent = kb?.name || "未命名知识库";
+  $("#currentKbDesc").textContent = kb?.description || "从这个知识库中检索并回答问题。";
+  renderKbs();
+  $("#uploadPanel").classList.remove("hidden");
+  $("#emptyState").classList.remove("hidden");
+  $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
+  await loadSessionMessages();
+  await loadDocuments();
+}
+
 async function loadSessions() {
   const response = await api("/api/sessions");
   if (!response.ok) return;
@@ -195,17 +206,6 @@ async function createSession() {
     await loadSessions();
   }
 }
-  const kb = state.kbs.find((item) => item.id === kbId);
-  $("#currentKbName").textContent = kb?.name || "未命名知识库";
-  $("#currentKbDesc").textContent = kb?.description || "从这个知识库中检索并回答问题。";
-  renderKbs();
-  $("#uploadPanel").classList.remove("hidden");
-  $("#emptyState").classList.remove("hidden");
-  $("#chat").querySelectorAll(".message-row").forEach((node) => node.remove());
-  await loadSessionMessages();
-  await loadDocuments();
-}
-
 async function loadDocuments() {
   if (!state.currentKbId) return;
   const response = await api(`/api/knowledge_bases/${state.currentKbId}/documents`);
