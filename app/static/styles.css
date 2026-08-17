@@ -371,6 +371,22 @@ textarea:focus {
   right: 8px;
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.message-actions .icon-button {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message-row:hover .message-actions .icon-button {
+  opacity: 1;
+}
+
 .message-row:hover .history-delete {
   display: grid;
 }

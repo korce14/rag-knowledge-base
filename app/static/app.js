@@ -199,17 +199,7 @@ async function loadSessionMessages() {
 }
 
 function addHistoryMessage(role, text, messageId) {
-  $("#emptyState").classList.add("hidden");
-  const row = document.createElement("div");
-  row.className = "message-row";
-  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${escapeHtml(text) || ""}</div><button class="icon-button small history-delete" data-message-id="${messageId}">×</button></div>`;
-  $("#chat").appendChild(row);
-  row.querySelector(".history-delete").addEventListener("click", async (event) => {
-    event.stopPropagation();
-    if (!window.confirm("删除这条消息？")) return;
-    const response = await api(`/api/messages/${messageId}`, { method: "DELETE" });
-    if (response.ok) row.remove();
-  });
+  addMessage(role, text, messageId);
 }
 
 async function clearSessionMessages() {
@@ -391,16 +381,29 @@ async function uploadDocument() {
   showToast("文档导入完成");
 }
 
-function addMessage(role, text) {
+function addMessage(role, text, messageId = null) {
   $("#emptyState").classList.add("hidden");
   const row = document.createElement("div");
   row.className = "message-row";
-  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${escapeHtml(text) || ""}</div></div>`;
+  row.innerHTML = `<div class="message ${role}"><div class="${role}-content">${escapeHtml(text) || ""}</div><div class="message-actions"><button class="icon-button small message-copy" aria-label="复制">⧉</button>${messageId ? `<button class="icon-button small danger message-delete" data-message-id="${messageId}" aria-label="删除">×</button>` : ""}</div></div>`;
   $("#chat").appendChild(row);
   $("#chat").scrollTop = $("#chat").scrollHeight;
+  row.querySelector(".message-copy").addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await navigator.clipboard.writeText(text || "");
+    showToast("已复制");
+  });
+  const deleteButton = row.querySelector(".message-delete");
+  if (deleteButton) {
+    deleteButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (!window.confirm("删除这条消息？")) return;
+      const response = await api(`/api/messages/${messageId}`, { method: "DELETE" });
+      if (response.ok) row.remove();
+    });
+  }
   return row.querySelector(`.${role}-content`);
 }
-
 function addSources(row, sources) {
   if (!sources.length) return;
   const node = document.createElement("div");
