@@ -14,7 +14,6 @@ import uuid
 
 from fastapi import HTTPException, status
 
-from .coding_agent import CodingAgent
 from .config import settings
 from .components import AccessControlComponent, ObservabilityComponent, RetrievalAdjustmentComponent
 from .agent import RagAgent
@@ -113,7 +112,6 @@ class KnowledgeBaseService:
         self.guard = Guard(self.prompts)
         self.logger = StructuredLogger()
         self.agent = RagAgent(self.generator)
-        self.coding_agent = CodingAgent(self.generator, self.guard)
         self.feedback_weights = FeedbackWeights(self.db)
         self.access_control = AccessControlComponent(self.db)
         self.retrieval_adjustment = RetrievalAdjustmentComponent(self.feedback_weights)
@@ -1140,10 +1138,6 @@ class KnowledgeBaseService:
             return text or fallback
         except Exception:
             return fallback
-
-    def run_coding_agent(self, actor: User, task: str, project_path: str, max_steps: int = 8) -> dict[str, Any]:
-        self._require_global_role(actor, Role.EDITOR)
-        return self.coding_agent.run(task, project_path, max_steps)
 
     # 内部辅助
 

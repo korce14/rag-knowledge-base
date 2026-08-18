@@ -25,13 +25,6 @@ class Guard:
             r"\[\s*system\s*\]",
             r"<\|im_start\|>",
             r"</?system>",
-            r"ignore\s+(previous|all|above)\s+(instructions|prompts|messages)",
-            r"disregard\s+(previous|all|system)",
-            r"forget\s+everything",
-            r"jailbreak",
-            r"developer\s+message\s*:\s*",
-            r"you\s+are\s+now\s+(an?|the)\s+(unrestricted|jailbroken)",
-            r"repeat\s+(all|your)\s+(instructions|system)",
         ]
         self.pii_patterns = [
             r"\b\d{18}\b",

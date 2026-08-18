@@ -15,9 +15,7 @@
 - 权限：用户 + 管理员/编辑者/查看者三级权限，文档粒度权限与共享
 - Prompt：YAML 文件版本化管理
 - 安全：Guard 输入输出校验、文件类型和大小限制、SQL 白名单、受限 AST 求值
-- 安全增强：Prompt Injection 防护、危险代码检测、敏感文件黑名单
 - Agent：ReAct 多轮工具循环，支持检索、计算、画图、只读 SQL 串联
-- 编码 Agent：Function Calling 原生工具调用，Developer/Tester 双角色工作流，沙箱内执行测试
 - 企业功能：文件夹索引、RSS/SQLite/API 外部数据源定时同步、分析卡片与报告导出、LLM 知识库目录与概述生成、API Key 鉴权、密码修改/重置
 - 工程化：pyproject 安装、pre-commit 规范检查、pytest 测试、Locust 压测、Render 云部署配置
 

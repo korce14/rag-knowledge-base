@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 from openai import AsyncOpenAI, OpenAI
 
@@ -88,27 +88,6 @@ class Generator:
             )
         )
         return response.choices[0].message.content or ""
-
-    def generate_with_tools(self, messages: list[dict[str, str]], tools: list[dict[str, Any]], temperature: float = 0.0) -> tuple[str | None, list[dict[str, Any]]]:
-        response = self.breaker.call(
-            lambda: self._get_client().chat.completions.create(
-                model=settings.generation_model,
-                messages=messages,
-                tools=tools,
-                temperature=temperature,
-            )
-        )
-        message = response.choices[0].message
-        tool_calls: list[dict[str, Any]] = []
-        for call in message.tool_calls or []:
-            tool_calls.append(
-                {
-                    "id": call.id,
-                    "type": call.type,
-                    "function": {"name": call.function.name, "arguments": call.function.arguments},
-                }
-            )
-        return message.content, tool_calls
 
     async def stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         async def create_stream():
