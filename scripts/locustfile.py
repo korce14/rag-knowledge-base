@@ -1,11 +1,12 @@
-﻿from locust import HttpUser, between, task
+import os
+from locust import HttpUser, between, task
 
 
 class RAGUser(HttpUser):
     wait_time = between(1, 3)
 
     def on_start(self):
-        response = self.client.post("/api/auth/login", json={"username": "korce", "password": "1516"})
+        response = self.client.post("/api/auth/login", json={"username": os.getenv("RAG_USERNAME", "korce"), "password": os.getenv("RAG_PASSWORD", "change-me")})
         self.token = response.json().get("token", "")
         self.kb_id = ""
         if self.token:

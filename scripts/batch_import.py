@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--file", type=Path, required=True)
     parser.add_argument("--kb-id", required=True)
     parser.add_argument("--username", default="korce")
-    parser.add_argument("--password", default="1516")
+    parser.add_argument("--password", default=os.getenv("RAG_PASSWORD", "change-me"))
     args = parser.parse_args()
 
     login = httpx.post(f"{BASE_URL}/api/auth/login", json={"username": args.username, "password": args.password})
