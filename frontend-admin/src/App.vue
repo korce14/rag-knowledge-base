@@ -14,7 +14,7 @@
     <div v-if="!token" class="login-card">
       <el-input v-model="username" placeholder="用户名" />
       <el-input v-model="password" type="password" placeholder="密码" show-password />
-      <el-button type="primary" @click="login">登录</el-button>
+      <el-button type="primary" @click="handleLogin">登录</el-button>
     </div>
 
     <el-tabs v-else v-model="activeTab" class="admin-tabs">
@@ -117,6 +117,14 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="编码 Agent" name="coding">
+        <el-input v-model="agentTask" type="textarea" :rows="3" placeholder="任务描述：让 Developer 写代码、Tester 写测试并运行" />
+        <el-input v-model="agentProjectPath" placeholder="项目绝对路径（沙箱复制后执行）" style="margin-top: 8px" />
+        <el-input-number v-model="agentMaxSteps" :min="1" :max="20" style="margin-top: 8px" />
+        <el-button type="primary" :loading="agentRunning" @click="runAgent" style="margin-left: 8px">运行</el-button>
+        <pre v-if="agentResult" class="result-box">{{ agentResult }}</pre>
+      </el-tab-pane>
+
       <el-tab-pane label="密码" name="password">
         <el-input v-model="oldPassword" type="password" placeholder="原密码" show-password />
         <el-input v-model="newPassword" type="password" placeholder="新密码（至少 8 位）" show-password style="margin-top: 8px" />
@@ -127,13 +135,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useApi } from './composables/useApi';
+import { useCodingAgent } from './composables/useCodingAgent';
 
-const token = ref(localStorage.getItem('rag_token') || '');
-const user = ref<any>(null);
-const username = ref('korce');
-const password = ref('');
+const { token, user, username, password, api, login, logout, boot } = useApi();
+const { task: agentTask, projectPath: agentProjectPath, maxSteps: agentMaxSteps, running: agentRunning, result: agentResult, run: runAgent } = useCodingAgent(api);
+
 const activeTab = ref('analytics');
 const kbs = ref<any[]>([]);
 const kbId = ref('');
@@ -156,54 +165,21 @@ const apiKeys = ref<any[]>([]);
 const oldPassword = ref('');
 const newPassword = ref('');
 
-const headers = computed(() => ({ Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/json' }));
-
-async function api(path: string, options: RequestInit = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...headers.value, ...(options.headers || {}) },
-  });
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    throw new Error(detail.detail || `HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
-async function login() {
-  const response = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: username.value, password: password.value }),
-  });
-  if (!response.ok) {
-    ElMessage.error('登录失败');
-    return;
-  }
-  const data = await response.json();
-  token.value = data.token;
-  localStorage.setItem('rag_token', data.token);
+async function bootApp() {
   await boot();
-}
-
-function logout() {
-  token.value = '';
-  user.value = null;
-  localStorage.removeItem('rag_token');
-}
-
-async function boot() {
-  try {
-    user.value = await api('/api/auth/me');
-    kbs.value = await api('/api/knowledge_bases');
-    if (kbs.value.length) {
-      kbId.value = kbs.value[0].id;
-      await loadAll();
-    }
-  } catch (error: any) {
-    ElMessage.error(error.message);
+  if (!token.value) return;
+  kbs.value = await api('/api/knowledge_bases');
+  if (kbs.value.length) {
+    kbId.value = kbs.value[0].id;
+    await loadAll();
   }
 }
+
+async function handleLogin() {
+  await login();
+  if (token.value) await bootApp();
+}
+
 
 async function loadAll() {
   if (!kbId.value) return;
@@ -363,7 +339,7 @@ async function changePassword() {
 }
 
 onMounted(() => {
-  if (token.value) boot();
+  if (token.value) bootApp();
 });
 </script>
 

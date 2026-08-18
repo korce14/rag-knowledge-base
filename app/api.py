@@ -570,6 +570,16 @@ async def export_analytics_card(card_id: str, kb_id: str, principal: CurrentUser
 async def generate_kb_overview(kb_id: str, principal: CurrentUser) -> dict:
     return service.generate_kb_overview(principal.user, kb_id)
 
+
+@app.post("/api/coding-agent/run")
+async def run_coding_agent(payload: dict, principal: CurrentUser) -> dict:
+    return service.run_coding_agent(
+        principal.user,
+        str(payload.get("task", "")),
+        str(payload.get("project_path", "")),
+        max_steps=int(payload.get("max_steps", 8)),
+    )
+
 def _short_id() -> str:
     import uuid
 
